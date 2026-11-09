@@ -1,0 +1,2 @@
+# 照原樣存，不轉換換行：install.cmd 要 CRLF，.ps1 的 BOM 也不能動
+* -text

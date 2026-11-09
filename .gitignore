@@ -1,0 +1,7 @@
+# 個人檔：金鑰、WiFi 帳密、班表和各種紀錄，只存在自己電腦
+bot-config.ps1
+wifi-accounts.ps1
+data/
+*.log
+*.lnk
+punch/checkin-screenshot.png
