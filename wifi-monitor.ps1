@@ -8,6 +8,9 @@ $EventSleep = 3
 $DebounceSec = 15
 $LogFile      = "$PSScriptRoot\wifi-monitor.log"
 $MaxLogKB = 500
+# 上面是預設值。控制面板改的值存在 settings.ps1（個人檔，不進 GitHub、自動更新不會蓋掉），有就覆蓋
+$SettingsFile = "$PSScriptRoot\settings.ps1"
+if (Test-Path $SettingsFile) { . $SettingsFile }
 
 # 單一實例鎖：排程工作與 dashboard 同時啟動時，只留一份（兩份會同時 POST Portal 互相打架）
 $script:Mutex = New-Object System.Threading.Mutex($false, "Global\WifiMonitor_guest_tung")
@@ -181,6 +184,11 @@ Register-ObjectEvent `
 
 Write-Log "=== WiFi 監控啟動 (事件驅動 + ${PollInterval}s 保底) ===" "Cyan"
 
+# 程式檔（自動更新）或 settings.ps1（控制面板存檔）變了就自己重開，新版和新設定才會生效。
+# 自己重開是因為監控是管理員權限跑的，一般權限的 update.ps1 停不掉它
+function Get-CodeStamp { "$((Get-Item $PSCommandPath).LastWriteTime.Ticks)|$((Get-Item $SettingsFile -ErrorAction SilentlyContinue).LastWriteTime.Ticks)" }
+$script:CodeStamp = Get-CodeStamp
+
 # ── 主迴圈 ──────────────────────────────────────────────────
 
 $script:FailStreak = 0                # 連續登入失敗輪數，到 3 就重啟網卡
@@ -190,6 +198,14 @@ $lastPoll    = [DateTime]::Now        # 上次保底輪詢時間
 while ($true) {
   # 任何意外錯誤都只記 log 不讓監控死掉；常駐程式停了就沒人顧網路
   try {
+    if ((Get-CodeStamp) -ne $script:CodeStamp) {
+        Write-Log "程式或設定已更新，重新啟動監控..." "Cyan"
+        Start-Sleep -Seconds 3   # 等檔案寫完再讀
+        $script:Mutex.ReleaseMutex()
+        Start-Process powershell.exe -WindowStyle Hidden `
+            -ArgumentList "-ExecutionPolicy Bypass -NonInteractive -File `"$PSCommandPath`""
+        exit
+    }
     $now      = [DateTime]::Now
     $cooldown = ($now - $lastAction).TotalSeconds -lt $DebounceSec
 

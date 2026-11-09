@@ -50,7 +50,7 @@ if ($Label -like "*上班*") {
     if ($bookedAt -and $bookedAt -gt (Get-Date)) {
         $text += "`n🕔 下班卡已預約：$(Format-PunchTime $bookedAt)"
     } else {
-        $text += "`n🕔 下班卡尚未預約，請記得手動打卡。"
+        $text += "`n🕔 下班卡還沒預約，點一下就能約：`n/off（17:35 左右）`n/am_off（值班隔天 08:05 左右）`n/pm_off（值班隔天 11:35 左右）"
     }
 }
 

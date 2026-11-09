@@ -8,6 +8,7 @@
 
 param([switch]$Silent)
 $SSID = "guest_tung"
+if (Test-Path "$PSScriptRoot\settings.ps1") { . "$PSScriptRoot\settings.ps1" }   # 控制面板改過的 SSID
 # 帳密在 wifi-accounts.ps1（install.ps1 產生，只存在自己電腦，不進 GitHub、更新也不會蓋掉）。
 # 裡面的 $Credentials 依序嘗試，前面失敗就換下一組。
 $AccountsFile = Join-Path $PSScriptRoot 'wifi-accounts.ps1'

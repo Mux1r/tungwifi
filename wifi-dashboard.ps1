@@ -20,6 +20,7 @@ $script:MonitorScript = Join-Path $script:Dir "wifi-monitor.ps1"
 $script:LoginScript   = Join-Path $script:Dir "wifi-login.ps1"
 $script:CheckinScript = Join-Path $script:Dir "punch\auto-checkin-v2.ps1"
 $script:LogFile       = Join-Path $script:Dir "wifi-monitor.log"
+$script:SettingsFile  = Join-Path $script:Dir "settings.ps1"   # 個人設定，不進 GitHub、自動更新不會蓋掉
 
 $script:TaskSvc = New-Object -ComObject Schedule.Service
 $script:TaskSvc.Connect()
@@ -82,7 +83,27 @@ function Write-Param([string]$File, [string]$VarName, [string]$Value) {
     [System.IO.File]::WriteAllText($File, $newContent, [System.Text.Encoding]::UTF8)
 }
 
-$script:SSID = Read-Param $script:MonitorScript "SSID"
+# 個人設定優先，沒設過就用 wifi-monitor.ps1 裡的預設值
+function Read-Setting([string]$Name) {
+    $v = Read-Param $script:SettingsFile $Name
+    if ($v -eq '') { $v = Read-Param $script:MonitorScript $Name }
+    $v
+}
+# 只寫進 settings.ps1：有這一行就改，沒有就加在最後
+function Write-Setting([string]$Name, [string]$Value) {
+    if (-not (Test-Path $script:SettingsFile)) {
+        [IO.File]::WriteAllText($script:SettingsFile,
+            "# 個人設定（控制面板寫入）。只存在這台電腦，不進 GitHub，自動更新也不會蓋掉。`r`n", (New-Object Text.UTF8Encoding $true))
+    }
+    if ((Get-Content $script:SettingsFile -Encoding UTF8) -match ('^\s*\$' + [regex]::Escape($Name) + '\s*=')) {
+        Write-Param $script:SettingsFile $Name $Value
+    } else {
+        $line = if ($Value -match '^\d+$') { "`$$Name = $Value" } else { "`$$Name = `"$Value`"" }
+        [IO.File]::AppendAllText($script:SettingsFile, "$line`r`n", (New-Object Text.UTF8Encoding $false))
+    }
+}
+
+$script:SSID = Read-Setting "SSID"
 
 # ══════════════════════════════════════════════════════════════
 # 狀態偵測（不靠 CommandLine，提權程序也偵測得到）
@@ -284,15 +305,34 @@ function New-ParamRow([System.Windows.Forms.Control]$Parent, [int]$Y,
 
 $grpM = New-Card $setv 16 8 688 206
 $null = New-Lbl $grpM "wifi-monitor.ps1" 12 8 300 18 $F_H $C_INK2
-$txSSID         = New-ParamRow $grpM 36  "SSID（WiFi 名稱）"  (Read-Param $script:MonitorScript "SSID")         "目標 WiFi 網路"
-$txPollInterval = New-ParamRow $grpM 68  "PollInterval（秒）" (Read-Param $script:MonitorScript "PollInterval") "保底輪詢間隔，預設 180"
-$txEventSleep   = New-ParamRow $grpM 100 "EventSleep（秒）"   (Read-Param $script:MonitorScript "EventSleep")   "事件掃描間隔，預設 3"
-$txDebounceSec  = New-ParamRow $grpM 132 "DebounceSec（秒）"  (Read-Param $script:MonitorScript "DebounceSec")  "重複觸發冷卻，預設 15"
-$txMaxLogKB     = New-ParamRow $grpM 164 "MaxLogKB（KB）"     (Read-Param $script:MonitorScript "MaxLogKB")     "日誌大小上限，預設 500"
+$txSSID         = New-ParamRow $grpM 36  "SSID（WiFi 名稱）"  (Read-Setting "SSID")         "目標 WiFi 網路"
+$txPollInterval = New-ParamRow $grpM 68  "PollInterval（秒）" (Read-Setting "PollInterval") "保底輪詢間隔，預設 180"
+$txEventSleep   = New-ParamRow $grpM 100 "EventSleep（秒）"   (Read-Setting "EventSleep")   "事件掃描間隔，預設 3"
+$txDebounceSec  = New-ParamRow $grpM 132 "DebounceSec（秒）"  (Read-Setting "DebounceSec")  "重複觸發冷卻，預設 15"
+$txMaxLogKB     = New-ParamRow $grpM 164 "MaxLogKB（KB）"     (Read-Setting "MaxLogKB")     "日誌大小上限，預設 500"
 
 # Portal 帳密不在這裡改：wifi-login.ps1 是好幾組輪流試的清單，要改直接編輯那個檔
 $btnSave = New-Btn $setv "儲存設定" 16 222 140 34 $B_GREEN
 $lblSaveMsg = New-Lbl $setv "" 168 230 520 20 $F_Body $C_GOOD
+
+# 夜間睡眠開關：開＝註冊 NightSleep/MorningWake 排程，關＝刪掉（實際動作在 sleep.ps1）
+$grpS = New-Card $setv 16 274 688 76
+$null = New-Lbl $grpS "夜間睡眠" 12 8 300 18 $F_H $C_INK2
+$lblSleep = New-Lbl $grpS "" 12 36 500 34 $F_Cap $C_MUTE
+$btnSleep = New-Btn $grpS "" 536 26 140 32 $B_GRAY
+function Update-SleepCard {
+    $on = [bool](Get-TaskRow 'NightSleep')
+    $lblSleep.Text = if ($on) { "已開啟：每天 01:00 閒置 10 分鐘就睡，07:00 叫醒。`n值班夜、傳過 /sleepoff 的晚上不睡。" }
+                     else     { "已關閉：電腦不會自己睡。" }
+    $lblSleep.ForeColor = if ($on) { $C_GOOD } else { $C_MUTE }
+    $btnSleep.Text = if ($on) { "關閉夜間睡眠" } else { "開啟夜間睡眠" }
+}
+$btnSleep.Add_Click({
+    $arg = if (Get-TaskRow 'NightSleep') { '-Uninstall' } else { '-Install' }
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $script:Dir 'sleep.ps1') $arg | Out-Null
+    Update-SleepCard
+})
+Update-SleepCard
 
 # ══════════════════════════════════════════════════════════════
 # 狀態更新
@@ -410,14 +450,13 @@ $btnSave.Add_Click({
         return
     }
     try {
-        Write-Param $script:MonitorScript "SSID"         $txSSID.Text
-        Write-Param $script:LoginScript   "SSID"         $txSSID.Text
-        Write-Param $script:MonitorScript "PollInterval" $txPollInterval.Text
-        Write-Param $script:MonitorScript "EventSleep"   $txEventSleep.Text
-        Write-Param $script:MonitorScript "DebounceSec"  $txDebounceSec.Text
-        Write-Param $script:MonitorScript "MaxLogKB"     $txMaxLogKB.Text
+        Write-Setting "SSID"         $txSSID.Text
+        Write-Setting "PollInterval" $txPollInterval.Text
+        Write-Setting "EventSleep"   $txEventSleep.Text
+        Write-Setting "DebounceSec"  $txDebounceSec.Text
+        Write-Setting "MaxLogKB"     $txMaxLogKB.Text
         $script:SSID = $txSSID.Text
-        $lblSaveMsg.Text      = "✓ 已儲存 $(Get-Date -Format 'HH:mm:ss') — 重啟監控後生效"
+        $lblSaveMsg.Text      = "✓ 已儲存 $(Get-Date -Format 'HH:mm:ss') — 監控幾秒內會自動套用"
         $lblSaveMsg.ForeColor = $C_GOOD
     } catch {
         $lblSaveMsg.Text      = "✕ 儲存失敗：$($_.Exception.Message)"

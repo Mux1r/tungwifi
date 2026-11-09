@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 # 打卡的共用函式庫。
 # 這裡是「怎麼算打卡時間、怎麼註冊排程」這些邏輯，
-# 由 nightly-book.ps1、scheduled-punch.ps1 和 test-punch-times.ps1 dot-source 使用。
+# 由 nightly-book.ps1、scheduled-punch.ps1、telegram-commands.ps1 和 test-punch-times.ps1 dot-source 使用。
 
 $PunchWrapper = "$PSScriptRoot\scheduled-punch.ps1"
 $TaskIn       = "PunchIn-Booked"
@@ -17,6 +17,16 @@ $TaskOut      = "PunchOut-Booked"
 function Add-PunchJitter {
     param([datetime]$At, [Parameter(Mandatory)][int[]]$Offset)
     $At.AddMinutes((Get-Random -Minimum $Offset[0] -Maximum ($Offset[1] + 1)))
+}
+
+# 往後最近的該打卡時間（今天已過就排明天）。-Now 可注入，供 test-punch-times.ps1。
+# 抖動要在「今天還是明天」之前套用：上班卡的抖動是往前的，07:52 才下指令的話，
+# 先看官方 08:00 會判成今天，抖完卻變成已經過去的 07:45。
+function Get-NextPunchTime {
+    param([int]$Hour, [int]$Minute, [Parameter(Mandatory)][int[]]$Offset, [datetime]$Now = (Get-Date))
+    $t = Add-PunchJitter -At $Now.Date.AddHours($Hour).AddMinutes($Minute) -Offset $Offset
+    if ($t -le $Now) { $t = $t.AddDays(1) }
+    $t
 }
 
 # 四種預約各自的官方時間（Hour/Minute）、落在哪個排程格、下班卡要不要往後錨一天（值班），
@@ -53,6 +63,53 @@ function Get-PunchMoment {
     param([Parameter(Mandatory)]$Punch)
     $p = $Plans[$Punch.Kind]
     Add-PunchJitter -Offset $p.Offset -At $Punch.Date.Date.AddHours($p.Hour).AddMinutes($p.Minute)
+}
+
+# 手動預約用：照班表找「下一張真的有這種卡」的時刻，而不是單純排下一個 11:35。
+# 值班日按 /pm_off 才會排到隔天，按 /in 也會跳過 906/908/休假日。找不到回 $null，由呼叫端退回照時間排。
+# 刻意只往後看 14 天：班表本來就一次只抄一個月，再遠的多半是還沒抄進來。
+function Find-ShiftPunchTime {
+    param([Parameter(Mandatory)][string]$Kind, [Parameter(Mandatory)][hashtable]$Codes,
+          [datetime]$Now = (Get-Date), [int]$Days = 14)
+    foreach ($i in 0..$Days) {
+        $d    = $Now.Date.AddDays($i)
+        $code = $Codes[$d.ToString('yyyy-MM-dd')]
+        $next = $Codes[$d.AddDays(1).ToString('yyyy-MM-dd')]
+        if (-not $code) { continue }
+        # 隔天查不到就不知道是不是值班，下班卡落在哪天說不準，寧可跳過也不亂排
+        if (-not $next -and $Kind -ne 'in') { continue }
+        try { $punches = @(Get-ShiftPunches -Date $d -Code $code -NextCode $next) } catch { continue }  # 沒見過的代碼 nightly-book 會吵
+        foreach ($p in ($punches | Where-Object { $_.Kind -eq $Kind })) {
+            $at = Get-PunchMoment -Punch $p
+            if ($at -gt $Now) { return $at }
+        }
+    }
+    $null
+}
+
+# Telegram 的 /in /off /am_off /pm_off：預約一張卡，回傳要回覆的文字。
+# 先照班表排；班表沒有這張卡（沒填班表、過期、臨時換班）才照時間排最近的一個。
+# 照時間排時，上班卡還預約著（人還沒上班），下班卡跟著上班卡那天算，值班隔天下班才排得到後天。
+function Add-PunchBooking {
+    param([Parameter(Mandatory)][ValidateSet('in', 'off', 'am_off', 'pm_off')][string]$Kind,
+          [hashtable]$Codes = @{}, [datetime]$Now = (Get-Date), [switch]$DryRun)
+    $p    = $Plans[$Kind]
+    $at   = Find-ShiftPunchTime -Kind $Kind -Codes $Codes -Now $Now
+    $note = ''
+    if (-not $at) {
+        $note = "`n（班表 14 天內找不到這張卡，先照時間排最近的一個，不對就傳 /cancel）"
+        $at   = Get-NextPunchTime -Hour $p.Hour -Minute $p.Minute -Offset $p.Offset -Now $Now
+        if ($p.Slot -eq $TaskOut) {
+            $inTask = Get-ScheduledTask -TaskName $TaskIn -ErrorAction SilentlyContinue
+            $in = if ($inTask) { [datetime]$inTask.Triggers[0].StartBoundary }
+            if ($in -and $in -gt $Now) {
+                $anchored = Add-PunchJitter -Offset $p.Offset -At $in.Date.AddDays($p.DayOffset).AddHours($p.Hour).AddMinutes($p.Minute)
+                if ($anchored -gt $Now) { $at = $anchored }
+            }
+        }
+    }
+    if (-not $DryRun) { Register-PunchTask -Name $p.Slot -At $at -Label "預約$($p.Label)" }
+    "✅ $($p.Label)約好了：$(Format-PunchTime $at -Now $Now)$note"
 }
 
 function Register-PunchTask {

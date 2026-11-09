@@ -54,18 +54,24 @@ $steps = @(
     @{ Name = 'WiFi 監控開機自啟'; File = "$Dir\setup-autostart.ps1"; Args = @() },
     @{ Name = 'dashboard 捷徑';    File = "$Dir\make-shortcut.ps1";   Args = @() },
     @{ Name = '接收 Telegram 指令'; File = "$Dir\punch\telegram-commands.ps1"; Args = @('-Install') },
-    @{ Name = '每天早上自動更新'; File = "$Dir\update.ps1"; Args = @('-Install') }
+    @{ Name = '每天早上自動更新'; File = "$Dir\update.ps1"; Args = @('-Install') },
+    # 手動 /in /off 預約的卡也要有人檢查有沒有打成，所以不管有沒有開依班表自動打卡都裝
+    @{ Name = '每 5 分鐘檢查預約的卡有沒有打成'; File = "$Dir\punch\punch-guard.ps1"; Args = @('-Install') }
 )
 # 依班表自動打卡：大多數人是自己傳 /punch 打卡，預設不開。重跑安裝選 N 就是關掉
 Write-Host "`n依班表自動打卡：每晚 21:00 照 data\shifts.csv 預約隔天的卡，時間到自動打。" -ForegroundColor Cyan
 Write-Host "只想自己用 /punch 或控制面板打卡的話，選 N 就好。"
 $auto = (Read-Host "開啟依班表自動打卡? (Y/N，預設 N)") -match '^[Yy]'
 if ($auto) {
-    $steps += @{ Name = '每晚 21:00 預約打卡'; File = "$Dir\punch\nightly-book.ps1"; Args = @('-Install') },
-              @{ Name = '每 5 分鐘檢查卡有沒有打成'; File = "$Dir\punch\punch-guard.ps1"; Args = @('-Install') }
+    $steps += @{ Name = '每晚 21:00 預約打卡'; File = "$Dir\punch\nightly-book.ps1"; Args = @('-Install') }
 } else {
-    Unregister-ScheduledTask -TaskName NightlyBook, PunchGuard, PunchIn-Booked, PunchOut-Booked -Confirm:$false -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName NightlyBook -Confirm:$false -ErrorAction SilentlyContinue
 }
+
+# 夜間睡眠：預設不開。重跑安裝選 N 就是關掉；之後也可以在控制面板「設定」頁開關
+Write-Host "`n夜間睡眠：每天 01:00 電腦閒置 10 分鐘就睡，07:00 自動叫醒（值班夜、傳過 /sleepoff 的晚上不睡）。" -ForegroundColor Cyan
+$sleep = (Read-Host "開啟夜間睡眠? (Y/N，預設 N)") -match '^[Yy]'
+$steps += @{ Name = '夜間睡眠'; File = "$Dir\sleep.ps1"; Args = @($(if ($sleep) { '-Install' } else { '-Uninstall' })) }
 $failed = @()
 foreach ($s in $steps) {
     Write-Host "`n== $($s.Name)" -ForegroundColor Cyan

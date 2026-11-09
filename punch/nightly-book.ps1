@@ -96,7 +96,7 @@ foreach ($p in $punches) {
     $lines += "$icon $($plan.Label)　$(Format-PunchTime $at -Now $Now)"
 }
 
-$text = "📅 ${intro}`n`n已預約：`n$($lines -join "`n")"
+$text = "📅 ${intro}`n`n已預約：`n$($lines -join "`n")`n不對的話傳 /cancel 取消。"
 
 # 班表快用完就提前提醒，免得月底那幾天沒排到
 $left = @($codes.Keys | Where-Object { $_ -ge $key }).Count

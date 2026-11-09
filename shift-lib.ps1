@@ -18,6 +18,24 @@ function Read-ShiftTable {
     $codes
 }
 
+# 那天晚上要不要值班（＝留在醫院過夜，可能半夜要遠端連回家裡的電腦，夜間睡眠就別睡）。
+# 判斷方式跟打卡那邊同一條：當天是全天班 9076，而且隔天是 906／908。查不到那天就回 $false（照常睡）。
+function Test-OncallNight {
+    param([Parameter(Mandatory)][datetime]$Date, [hashtable]$Codes = (Read-ShiftTable))
+    ($Codes[$Date.ToString('yyyy-MM-dd')] -eq '9076') -and
+    ($Codes[$Date.AddDays(1).ToString('yyyy-MM-dd')] -in '906', '908')
+}
+
+# 「這一晚」是哪天：往前推 6 小時。電腦 01:00 才睡，00:30 傳的 /sleepoff 要算前一晚，不然 01:00 認不得照睡
+function Get-NightOf { param([datetime]$At = (Get-Date)) $At.AddHours(-6).Date }
+
+# /sleepoff 寫進這個檔的是「哪一晚不睡」，過了那晚自動失效
+$SkipSleepFlag = Join-Path $PSScriptRoot 'data\skip-sleep.flag'
+function Test-SkipSleep {
+    param([datetime]$Night = (Get-NightOf))
+    (Test-Path $SkipSleepFlag) -and ((Get-Content $SkipSleepFlag -Raw).Trim() -eq $Night.ToString('yyyy-MM-dd'))
+}
+
 # 送一則 Telegram。有 data/tg-topics.json 就送進指定話題，沒有就直接送聊天室。
 # 話題讀不到或被刪了就改送沒分區的地方，訊息不能因此不見；整個送不出去也不丟錯，通知失敗不能害正事跟著失敗。
 # 回傳實際送進的話題 id（scheduled-punch.ps1 的截圖要跟著送同一個話題）。

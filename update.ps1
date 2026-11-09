@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 # 每天早上從 GitHub 抓最新版覆蓋到這個資料夾。
-# 只蓋程式檔：bot-config.ps1、wifi-accounts.ps1 和 data\ 底下（班表、紀錄）是每個人自己的，一律不碰。
+# 只蓋程式檔：bot-config.ps1、wifi-accounts.ps1、settings.ps1 和 data\ 底下（班表、紀錄）是每個人自己的，一律不碰。
 # 新版裡只要有一支腳本語法錯誤就整批不更新，免得一次壞掉大家的打卡。
 #
 # 用法：
@@ -32,7 +32,7 @@ $VersionFile = "$Dir\data\version.txt"
 function Log([string]$Msg) { try { Add-Content $LogFile "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Msg" -Encoding UTF8 } catch {} }
 
 # 這幾個是個人檔，就算哪天不小心進了 repo 也不能蓋掉本機那份
-$Personal = 'bot-config.ps1', 'wifi-accounts.ps1'
+$Personal = 'bot-config.ps1', 'wifi-accounts.ps1', 'settings.ps1'
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $tmp = Join-Path $env:TEMP "tungwifi-update-$PID"
@@ -69,7 +69,7 @@ try {
     Log "更新到 $($sha.Substring(0, 7))：$msg"
 
     # 收 Telegram 指令的程式是常駐的，重開才會用到新版。
-    # WiFi 監控是管理員權限的常駐程式，這裡停不掉，下次登入或重開機就會是新版。
+    # WiFi 監控不用管：它發現自己的程式檔變了會自己重開（它是管理員權限，這裡也停不掉）
     Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
         Where-Object { $_.CommandLine -match 'telegram-commands\.ps1' } |
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
