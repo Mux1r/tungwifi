@@ -1,20 +1,23 @@
 ﻿#Requires -Version 5.1
-# 夜間睡眠（選用，預設關閉）：每天 01:00 等電腦閒置滿 10 分鐘就讓它睡，07:00 自動叫醒。
+# 夜間睡眠（選用，預設關閉）：每天到了設定的時間（預設 01:00）等電腦閒置滿 10 分鐘就讓它睡，起床時間（預設 07:00）自動叫醒。
+# 時間在控制面板「睡眠與電源」頁改，存在 settings.ps1 的 $SleepAt / $WakeAt。
 # 以下情況不睡：
 #   - 當晚傳過 /sleepoff（隔天自動恢復）
 #   - 值班夜（班表上當天 9076、隔天 906/908），可能半夜要遠端連回來
 #   - Parsec 遠端連線中（遠端操作不算本機的鍵盤滑鼠，會被誤判成閒置）
-#   - 等到 05:00 還沒閒置下來：再睡兩小時就要被叫醒，不值得
+#   - 離起床不到兩小時還沒閒置下來：睡沒多久就要被叫醒，不值得
 # 預約打卡的排程本來就有 WakeToRun，睡著也會醒來打卡。
 #
 # 用法：
-#   sleep.ps1              01:00 由排程跑
+#   sleep.ps1              到睡覺時間由排程跑
 #   sleep.ps1 -Install     開啟（註冊 NightSleep、MorningWake 兩張排程，順便打開「允許喚醒計時器」）
 #   sleep.ps1 -Uninstall   關閉
 #   sleep.ps1 -DryRun      只印判斷結果，不等閒置也不睡；-Now 可假裝任何時間
 param([switch]$Install, [switch]$Uninstall, [switch]$DryRun, [datetime]$Now = (Get-Date))
 
-$SleepAt = '01:00'; $WakeAt = '07:00'   # 刻意寫死不開成設定：想改時間的人極少，要改就改這裡
+. "$PSScriptRoot\shift-lib.ps1"   # Get-SleepTimes、Test-OncallNight、Get-NightOf、Test-SkipSleep
+$times   = Get-SleepTimes
+$SleepAt = $times.Sleep; $WakeAt = $times.Wake
 $Tasks   = 'NightSleep', 'MorningWake'
 
 if ($Uninstall) {
@@ -47,14 +50,19 @@ if ($Install) {
     return
 }
 
-. "$PSScriptRoot\shift-lib.ps1"   # Test-OncallNight、Get-NightOf、Test-SkipSleep
 $night  = Get-NightOf $Now
 $skip   = Test-SkipSleep $night
 $oncall = Test-OncallNight -Date $night
 if ($skip -or $oncall) { if ($DryRun) { Write-Host "不睡：/sleepoff=$skip 值班夜=$oncall" }; exit }
-# 保險：只在凌晨真的睡。有人白天手動觸發這張排程也不准把電腦弄睡
-if ($Now.TimeOfDay -lt [TimeSpan]'00:45' -or $Now.TimeOfDay -gt [TimeSpan]'05:00') {
-    if ($DryRun) { Write-Host "不在 00:45–05:00 之間，不睡" }; exit
+# 保險：只在「睡覺時間前 15 分鐘」到「起床前 2 小時」之間真的睡（可以跨午夜，例如 23:00 睡 07:00 醒）。
+# 有人白天手動觸發這張排程也不准把電腦弄睡；離起床不到兩小時也不睡了
+function Test-SleepWindow([datetime]$At) {
+    $span = ((([TimeSpan]$WakeAt) - ([TimeSpan]$SleepAt)).TotalMinutes + 1440) % 1440
+    $el   = (($At.TimeOfDay - [TimeSpan]$SleepAt).TotalMinutes + 1440 + 15) % 1440 - 15
+    $el -ge -15 -and $el -le $span - 120
+}
+if (-not (Test-SleepWindow $Now)) {
+    if ($DryRun) { Write-Host "不在 $SleepAt 前 15 分鐘到 $WakeAt 前 2 小時之間，不睡" }; exit
 }
 if ($DryRun) { Write-Host "會等閒置滿 10 分鐘、沒有 Parsec 連線後睡覺"; exit }
 
@@ -79,7 +87,7 @@ function Test-ParsecActive {
     return [bool]($last -and $last.Line.TrimEnd().EndsWith(' connected.'))
 }
 while ([Idle]::MinutesIdle() -lt 10 -or (Test-ParsecActive)) {
-    if ((Get-Date).TimeOfDay -gt [TimeSpan]'05:00') { exit }
+    if (-not (Test-SleepWindow (Get-Date))) { exit }
     if (Test-SkipSleep $night) { exit }   # 等的時候才傳 /sleepoff 也要算數
     Start-Sleep -Seconds 60
 }

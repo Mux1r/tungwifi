@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 # WiFi 控制台 — 左側選單四頁：首頁（狀態、操作、日誌）、打卡記錄、功能開關、關於與更新
-# 深色介面色票取自已驗證的 dataviz 狀態色盤（深色底對比 ≥3:1）
+# 外觀比照 ok-ww 用的 Fluent（Windows 11 設定那種）：圓角卡片、系統強調色、滑動開關，跟著系統深淺色
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -32,37 +32,287 @@ $MonitorTask = "WiFi-AutoLogin-Monitor"
 $PunchTasks  = "PunchIn-Booked", "PunchOut-Booked"   # nightly-book.ps1 每晚建的預約
 
 # ══════════════════════════════════════════════════════════════
-# 色票（dataviz 深色模式：頁面/卡片/墨色/狀態色）
+# 外觀元件：WinForms 本身畫不出圓角和滑動開關，用內建的 C# 編譯自己畫（不用另外裝任何東西）
 # ══════════════════════════════════════════════════════════════
 
-$C_PAGE = [System.Drawing.Color]::FromArgb(13, 13, 13)     # 頁面底
-$C_SIDE = [System.Drawing.Color]::FromArgb(19, 19, 18)     # 側欄
-$C_CARD = [System.Drawing.Color]::FromArgb(26, 26, 25)     # 卡片面
-$C_WELL = [System.Drawing.Color]::FromArgb(19, 19, 18)     # 內凹區（日誌）
-$C_INK  = [System.Drawing.Color]::FromArgb(255, 255, 255)  # 主要文字
-$C_INK2 = [System.Drawing.Color]::FromArgb(195, 194, 183)  # 次要文字
-$C_MUTE = [System.Drawing.Color]::FromArgb(137, 135, 129)  # 弱化文字
-$C_HAIR = [System.Drawing.Color]::FromArgb(44, 44, 42)     # 髮絲線
-$C_GOOD = [System.Drawing.Color]::FromArgb(12, 163, 12)    # 狀態：正常
-$C_WARN = [System.Drawing.Color]::FromArgb(250, 178, 25)   # 狀態：警告
-$C_CRIT = [System.Drawing.Color]::FromArgb(208, 59, 59)    # 狀態：異常
-$C_ACC  = [System.Drawing.Color]::FromArgb(57, 135, 229)   # 強調藍
+Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinition @'
+using System;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
+using System.Windows.Forms;
 
-$B_GREEN = [System.Drawing.Color]::FromArgb(23, 99, 46)
-$B_RED   = [System.Drawing.Color]::FromArgb(126, 47, 47)
-$B_BLUE  = [System.Drawing.Color]::FromArgb(36, 86, 127)
-$B_GRAY  = [System.Drawing.Color]::FromArgb(38, 38, 43)
+namespace Fluent
+{
+    public static class Theme
+    {
+        public static bool Dark = true;
+        public static Color Window, Stack, Card, Stroke, Text, Text2, Text3, Accent, AccentHover, AccentPressed, AccentText,
+            Control, ControlHover, ControlPressed, ControlStroke, Field, NavHover, NavSel, Disabled;
+        public static Font Body, Icon;
 
-$F_Title = New-Object System.Drawing.Font("Segoe UI Semibold", 13)
-$F_H     = New-Object System.Drawing.Font("Segoe UI Semibold", 9.75)
-$F_Body  = New-Object System.Drawing.Font("Segoe UI", 9.5)
-$F_Cap   = New-Object System.Drawing.Font("Segoe UI", 8)
-$F_Val   = New-Object System.Drawing.Font("Segoe UI Semibold", 10.5)
-$F_Btn   = New-Object System.Drawing.Font("Segoe UI Semibold", 9)
-$F_Nav   = New-Object System.Drawing.Font("Segoe UI Semibold", 10)
-$F_Mono  = New-Object System.Drawing.Font("Consolas", 9)
+        public static GraphicsPath Round(RectangleF r, float rad)
+        {
+            GraphicsPath p = new GraphicsPath();
+            float d = rad * 2;
+            if (d <= 0) { p.AddRectangle(r); return p; }
+            p.AddArc(r.X, r.Y, d, d, 180, 90);
+            p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            p.CloseFigure();
+            return p;
+        }
 
-$script:HairPen = New-Object System.Drawing.Pen $C_HAIR, 1
+        [DllImport("dwmapi.dll")] static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int val, int size);
+        [DllImport("uxtheme.dll", CharSet = CharSet.Unicode)] static extern int SetWindowTheme(IntPtr hwnd, string app, string idList);
+
+        // 標題列跟著深色（Windows 10 1809 以後才有，舊系統呼叫失敗就算了）
+        public static void StyleWindow(Form f)
+        {
+            try { int v = Dark ? 1 : 0; DwmSetWindowAttribute(f.Handle, 20, ref v, 4); } catch { }
+        }
+        // 捲軸也換成深色
+        public static void DarkScroll(Control c)
+        {
+            try { if (Dark) SetWindowTheme(c.Handle, "DarkMode_Explorer", null); } catch { }
+        }
+        // 下拉選單換成深色（展開的清單和箭頭）
+        public static void DarkCombo(Control c)
+        {
+            try { if (Dark) SetWindowTheme(c.Handle, "DarkMode_CFD", null); } catch { }
+        }
+        // 標誌：Lucide 的 calendar-clock（24 格、圓頭線條）；app.ico 也是用同一組座標畫的
+        public static void DrawLogo(Graphics g, RectangleF r, Color c, float stroke)
+        {
+            float s = r.Width / 24f; float x = r.X, y = r.Y;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (Pen p = new Pen(c, stroke * s))
+            {
+                p.StartCap = LineCap.Round; p.EndCap = LineCap.Round; p.LineJoin = LineJoin.Round;
+                using (GraphicsPath f = new GraphicsPath())   // 日曆外框：右上缺一角讓給時鐘
+                {
+                    f.AddLine(x + 21 * s, y + 7.5f * s, x + 21 * s, y + 6 * s);
+                    f.AddArc(x + 17 * s, y + 4 * s, 4 * s, 4 * s, 0, -90);
+                    f.AddLine(x + 19 * s, y + 4 * s, x + 5 * s, y + 4 * s);
+                    f.AddArc(x + 3 * s, y + 4 * s, 4 * s, 4 * s, 270, -90);
+                    f.AddLine(x + 3 * s, y + 6 * s, x + 3 * s, y + 20 * s);
+                    f.AddArc(x + 3 * s, y + 18 * s, 4 * s, 4 * s, 180, -90);
+                    f.AddLine(x + 5 * s, y + 22 * s, x + 8.5f * s, y + 22 * s);
+                    g.DrawPath(p, f);
+                }
+                g.DrawLine(p, x + 16 * s, y + 2 * s, x + 16 * s, y + 6 * s);
+                g.DrawLine(p, x + 8 * s, y + 2 * s, x + 8 * s, y + 6 * s);
+                g.DrawLine(p, x + 3 * s, y + 10 * s, x + 8 * s, y + 10 * s);
+                g.DrawEllipse(p, x + 10 * s, y + 10 * s, 12 * s, 12 * s);
+                g.DrawLines(p, new PointF[] { new PointF(x + 17.5f * s, y + 17.5f * s), new PointF(x + 16 * s, y + 16.3f * s), new PointF(x + 16 * s, y + 14 * s) });
+            }
+        }
+        public static void Buffer(Control c)
+        {
+            typeof(Control).GetProperty("DoubleBuffered", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance).SetValue(c, true, null);
+        }
+    }
+
+    public abstract class Drawn : Control
+    {
+        protected bool hover, down;
+        protected Drawn()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                     ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
+            BackColor = Color.Transparent;
+            Cursor = Cursors.Hand;
+            Font = Theme.Body;
+        }
+        protected override void OnMouseEnter(EventArgs e) { hover = true; Invalidate(); base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { hover = false; down = false; Invalidate(); base.OnMouseLeave(e); }
+        protected override void OnMouseDown(MouseEventArgs e) { down = true; Invalidate(); base.OnMouseDown(e); }
+        protected override void OnMouseUp(MouseEventArgs e) { down = false; Invalidate(); base.OnMouseUp(e); }
+        protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
+        protected override void OnTextChanged(EventArgs e) { Invalidate(); base.OnTextChanged(e); }
+    }
+
+    // 圓角卡片；裡面的 Label 背景設透明就會透出卡片顏色
+    public class Card : Panel
+    {
+        public int Radius = 6;
+        public Color Fill = Color.Empty;
+        public bool Border = true;
+        public Card()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                     ControlStyles.ResizeRedraw | ControlStyles.SupportsTransparentBackColor, true);
+            BackColor = Color.Transparent;
+        }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (GraphicsPath p = Theme.Round(new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f), Radius))
+            using (SolidBrush b = new SolidBrush(Fill.IsEmpty ? Theme.Card : Fill))
+            {
+                g.FillPath(b, p);
+                if (Border) using (Pen pen = new Pen(Theme.Stroke)) g.DrawPath(pen, p);
+            }
+            base.OnPaint(e);
+        }
+    }
+
+    // 圓角按鈕：Accent＝強調色主按鈕，其他是一般按鈕；Glyph 是圖示字型裡的字元
+    public class FButton : Drawn
+    {
+        public bool Accent;
+        string glyph = "";
+        public string Glyph { get { return glyph; } set { glyph = value ?? ""; Invalidate(); } }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            Color bg, fg, st;
+            if (Accent)
+            {
+                bg = !Enabled ? Theme.Disabled : down ? Theme.AccentPressed : hover ? Theme.AccentHover : Theme.Accent;
+                fg = Enabled ? Theme.AccentText : Theme.Text3; st = bg;
+            }
+            else
+            {
+                bg = !Enabled ? Theme.Control : down ? Theme.ControlPressed : hover ? Theme.ControlHover : Theme.Control;
+                fg = Enabled ? Theme.Text : Theme.Text3; st = Theme.ControlStroke;
+            }
+            using (GraphicsPath p = Theme.Round(new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f), 4))
+            using (SolidBrush b = new SolidBrush(bg))
+            using (Pen pen = new Pen(st)) { g.FillPath(b, p); g.DrawPath(pen, p); }
+            TextFormatFlags f = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine;
+            Size ts = TextRenderer.MeasureText(g, Text, Font, Size.Empty, f);
+            Size gs = glyph.Length > 0 ? TextRenderer.MeasureText(g, glyph, Theme.Icon, Size.Empty, f) : Size.Empty;
+            int gap = (glyph.Length > 0 && Text.Length > 0) ? 8 : 0;
+            int x = (Width - ts.Width - gs.Width - gap) / 2;
+            if (glyph.Length > 0) TextRenderer.DrawText(g, glyph, Theme.Icon, new Point(x, (Height - gs.Height) / 2 + 1), fg, f);
+            TextRenderer.DrawText(g, Text, Font, new Point(x + gs.Width + gap, (Height - ts.Height) / 2), fg, f);
+        }
+    }
+
+    // 滑動開關。點了不會自己切換：由外面做完實際動作後依結果設 Checked，畫面才不會跟真實狀態對不上
+    public class Toggle : Drawn
+    {
+        bool on;
+        public string OnText = "開啟", OffText = "關閉";
+        public bool Checked { get { return on; } set { on = value; Invalidate(); } }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            float h = 20, w = 40;
+            RectangleF r = new RectangleF(0.5f, (Height - h) / 2f, w, h);
+            using (GraphicsPath p = Theme.Round(r, h / 2f))
+            {
+                if (on)
+                    using (SolidBrush b = new SolidBrush(!Enabled ? Theme.Disabled : hover ? Theme.AccentHover : Theme.Accent)) g.FillPath(b, p);
+                else
+                {
+                    using (SolidBrush b = new SolidBrush(hover ? Theme.ControlHover : Theme.Control)) g.FillPath(b, p);
+                    using (Pen pen = new Pen(Enabled ? Theme.Text2 : Theme.Text3)) g.DrawPath(pen, p);
+                }
+            }
+            float d = (hover && Enabled) ? 14 : 12;
+            float cx = on ? r.Right - 10 : r.X + 10, cy = r.Y + h / 2f;
+            using (SolidBrush b = new SolidBrush(on ? Theme.AccentText : (Enabled ? Theme.Text2 : Theme.Text3)))
+                g.FillEllipse(b, cx - d / 2f, cy - d / 2f, d, d);
+            string t = on ? OnText : OffText;
+            Size ts = TextRenderer.MeasureText(g, t, Font);
+            TextRenderer.DrawText(g, t, Font, new Point((int)w + 10, (Height - ts.Height) / 2), Enabled ? Theme.Text : Theme.Text3);
+        }
+    }
+
+    public class Logo : Control
+    {
+        public Logo()
+        {
+            SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
+                     ControlStyles.SupportsTransparentBackColor, true);
+            BackColor = Color.Transparent;
+        }
+        protected override void OnPaint(PaintEventArgs e) { Theme.DrawLogo(e.Graphics, new RectangleF(0, 0, Width, Height), Theme.Accent, 2); }
+    }
+
+    // 左側選單項目：選中時底色加深、左邊一條強調色
+    public class NavItem : Drawn
+    {
+        public string Glyph = "";
+        bool sel;
+        public bool Selected { get { return sel; } set { sel = value; Invalidate(); } }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Graphics g = e.Graphics;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            if (sel || hover)
+                using (GraphicsPath p = Theme.Round(new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f), 4))
+                using (SolidBrush b = new SolidBrush(sel ? Theme.NavSel : Theme.NavHover)) g.FillPath(b, p);
+            if (sel)
+                using (GraphicsPath p = Theme.Round(new RectangleF(1, (Height - 16) / 2f, 3, 16), 1.5f))
+                using (SolidBrush b = new SolidBrush(Theme.Accent)) g.FillPath(b, p);
+            Size gs = TextRenderer.MeasureText(g, Glyph, Theme.Icon);
+            TextRenderer.DrawText(g, Glyph, Theme.Icon, new Point(14, (Height - gs.Height) / 2 + 1), Theme.Text);
+            Size ts = TextRenderer.MeasureText(g, Text, Font);
+            TextRenderer.DrawText(g, Text, Font, new Point(46, (Height - ts.Height) / 2), Theme.Text);
+        }
+    }
+}
+'@
+
+# ── 色票：跟著系統深淺色；強調色取 Windows 個人化設定的強調色 ──
+function C([string]$Hex) { [System.Drawing.ColorTranslator]::FromHtml($Hex) }
+function Mix($A, $B, [double]$T) {
+    [System.Drawing.Color]::FromArgb([int]($A.R + ($B.R - $A.R) * $T), [int]($A.G + ($B.G - $A.G) * $T), [int]($A.B + ($B.B - $A.B) * $T))
+}
+$dark = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -ErrorAction SilentlyContinue).AppsUseLightTheme -ne 1
+$T = [Fluent.Theme]
+$T::Dark = $dark
+# AccentPalette 是 8 組 RGBA，由淺到深；深色模式用淺的（第 2 組）、淺色模式用深的（第 5 組），跟 Windows 設定一樣
+$palette = (Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Accent' -ErrorAction SilentlyContinue).AccentPalette
+$ai = if ($dark) { 1 } else { 4 }
+$accent = if ($palette -and $palette.Length -ge 32) { [System.Drawing.Color]::FromArgb($palette[$ai * 4], $palette[$ai * 4 + 1], $palette[$ai * 4 + 2]) }
+          elseif ($dark) { C '#60CDFF' } else { C '#005FB8' }
+if ($dark) {
+    $T::Window = C '#202020'; $T::Stack = C '#272727'; $T::Card = C '#2D2D2D'; $T::Stroke = C '#1C1C1C'
+    $T::Text = C '#FFFFFF'; $T::Text2 = C '#C5C5C5'; $T::Text3 = C '#8B8B8B'
+    $T::Control = C '#363636'; $T::ControlHover = C '#3B3B3B'; $T::ControlPressed = C '#303030'; $T::ControlStroke = C '#424242'
+    $T::Field = C '#383838'; $T::NavHover = C '#2A2A2A'; $T::NavSel = C '#2D2D2D'; $T::Disabled = C '#434343'
+    $T::AccentText = C '#000000'
+    $C_GOOD = C '#6CCB5F'; $C_WARN = C '#FCE100'; $C_CRIT = C '#FF99A4'
+    $T::AccentHover = Mix $accent $T::Window 0.1; $T::AccentPressed = Mix $accent $T::Window 0.2
+} else {
+    $T::Window = C '#F3F3F3'; $T::Stack = C '#F9F9F9'; $T::Card = C '#FFFFFF'; $T::Stroke = C '#E5E5E5'
+    $T::Text = C '#1B1B1B'; $T::Text2 = C '#5D5D5D'; $T::Text3 = C '#8A8A8A'
+    $T::Control = C '#FBFBFB'; $T::ControlHover = C '#F6F6F6'; $T::ControlPressed = C '#F0F0F0'; $T::ControlStroke = C '#E0E0E0'
+    $T::Field = C '#FFFFFF'; $T::NavHover = C '#EDEDED'; $T::NavSel = C '#EAEAEA'; $T::Disabled = C '#C5C5C5'
+    $T::AccentText = C '#FFFFFF'
+    $C_GOOD = C '#0F7B0F'; $C_WARN = C '#9D5D00'; $C_CRIT = C '#C42B1C'
+    $T::AccentHover = Mix $accent $T::Window 0.1; $T::AccentPressed = Mix $accent $T::Window 0.2
+}
+$T::Accent = $accent
+$C_INK = $T::Text; $C_INK2 = $T::Text2; $C_MUTE = $T::Text3; $C_ACC = $accent; $C_CARD = $T::Card
+
+$iconFont = if ((New-Object System.Drawing.Text.InstalledFontCollection).Families.Name -contains 'Segoe Fluent Icons') { 'Segoe Fluent Icons' } else { 'Segoe MDL2 Assets' }
+$F_Title = New-Object System.Drawing.Font("Segoe UI Semibold", 20)
+$F_H     = New-Object System.Drawing.Font("Segoe UI Semibold", 10)
+$F_Body  = New-Object System.Drawing.Font("Segoe UI", 10)
+$F_Cap   = New-Object System.Drawing.Font("Segoe UI", 9)
+$F_Val   = New-Object System.Drawing.Font("Segoe UI Semibold", 11)
+$F_Mono  = New-Object System.Drawing.Font("Consolas", 9.5)
+$F_Icon  = New-Object System.Drawing.Font($iconFont, 12)
+$F_IconL = New-Object System.Drawing.Font($iconFont, 16)
+$T::Body = $F_Body; $T::Icon = $F_Icon
+
+# 圖示字型裡的字元（Segoe Fluent Icons / MDL2 共用編碼）
+function G([int]$Code) { [string][char]$Code }
+$Icon = @{   # 不叫 $I：PowerShell 變數不分大小寫，會被迴圈的 $i 蓋掉
+    Home = G 0xE80F; History = G 0xE81C; Setting = G 0xE713; Info = G 0xE946; Wifi = G 0xE701; Globe = G 0xE774
+    Pulse = G 0xE9D9; Clock = G 0xE823; Play = G 0xE768; Stop = G 0xE71A; Bolt = G 0xE945; Search = G 0xE721
+    Refresh = G 0xE72C; Photo = G 0xE91B; Send = G 0xE724; Calendar = G 0xE787; Moon = G 0xE708; Sync = G 0xE895
+    Undo = G 0xE7A7; Download = G 0xE896; Edit = G 0xE70F; Save = G 0xE74E; Clear = G 0xE894; List = G 0xEA37
+}
 
 # ══════════════════════════════════════════════════════════════
 # 參數讀寫
@@ -244,12 +494,14 @@ $KindColor = @{ ok = $C_GOOD; fail = $C_CRIT; test = $C_ACC; unknown = $C_WARN }
 # UI 輔助
 # ══════════════════════════════════════════════════════════════
 
+function Set-Box($Ctl, [int]$X, [int]$Y, [int]$W, [int]$H) {
+    $Ctl.Location = New-Object System.Drawing.Point($X, $Y)
+    $Ctl.Size     = New-Object System.Drawing.Size($W, $H)
+}
+
 function New-Card([System.Windows.Forms.Control]$Parent, [int]$X, [int]$Y, [int]$W, [int]$H) {
-    $p = New-Object System.Windows.Forms.Panel
-    $p.Location  = New-Object System.Drawing.Point($X, $Y)
-    $p.Size      = New-Object System.Drawing.Size($W, $H)
-    $p.BackColor = $C_CARD
-    $p.Add_Paint({ $_.Graphics.DrawRectangle($script:HairPen, 0, 0, $this.Width - 1, $this.Height - 1) })
+    $p = New-Object Fluent.Card
+    Set-Box $p $X $Y $W $H
     $Parent.Controls.Add($p)
     return $p
 }
@@ -258,8 +510,7 @@ function New-Lbl([System.Windows.Forms.Control]$Parent, [string]$Text, [int]$X, 
                  [System.Drawing.Font]$Font, [System.Drawing.Color]$Color) {
     $l = New-Object System.Windows.Forms.Label
     $l.Text      = $Text
-    $l.Location  = New-Object System.Drawing.Point($X, $Y)
-    $l.Size      = New-Object System.Drawing.Size($W, $H)
+    Set-Box $l $X $Y $W $H
     $l.Font      = $Font
     $l.ForeColor = $Color
     $l.BackColor = [System.Drawing.Color]::Transparent
@@ -268,30 +519,31 @@ function New-Lbl([System.Windows.Forms.Control]$Parent, [string]$Text, [int]$X, 
 }
 
 function New-Btn([System.Windows.Forms.Control]$Parent, [string]$Text, [int]$X, [int]$Y, [int]$W, [int]$H,
-                 [System.Drawing.Color]$BG) {
-    $b = New-Object System.Windows.Forms.Button
-    $b.Text      = $Text
-    $b.Location  = New-Object System.Drawing.Point($X, $Y)
-    $b.Size      = New-Object System.Drawing.Size($W, $H)
-    $b.BackColor = $BG
-    $b.ForeColor = $C_INK
-    $b.Font      = $F_Btn
-    $b.FlatStyle = "Flat"
-    $b.FlatAppearance.BorderSize = 0
-    $b.Cursor    = "Hand"
-    $hov = [System.Drawing.Color]::FromArgb(
-        [Math]::Min(255, $BG.R + 24), [Math]::Min(255, $BG.G + 24), [Math]::Min(255, $BG.B + 24))
-    $b.Tag = @{ N = $BG; H = $hov }
-    $b.Add_MouseEnter({ $this.BackColor = $this.Tag.H })
-    $b.Add_MouseLeave({ $this.BackColor = $this.Tag.N })
+                 [string]$Glyph = '', [switch]$Accent) {
+    $b = New-Object Fluent.FButton
+    $b.Text   = $Text
+    $b.Glyph  = $Glyph
+    $b.Accent = [bool]$Accent
+    Set-Box $b $X $Y $W $H
     $Parent.Controls.Add($b)
     return $b
 }
 
-function New-Tile([System.Windows.Forms.Control]$Parent, [string]$Caption, [int]$X) {
-    $card = New-Card $Parent $X 8 166 66
-    $null = New-Lbl $card $Caption 12 9 140 15 $F_Cap $C_MUTE
-    return (New-Lbl $card "○ 檢查中..." 12 28 148 24 $F_Val $C_MUTE)
+# 卡片左上角的圖示＋標題（Fluent 設定卡片的樣子）
+function Add-CardHead($Card, [string]$Glyph, [string]$Title) {
+    if ($Glyph) {
+        $null = New-Lbl $Card $Glyph 18 14 24 24 $F_IconL $C_INK
+        $null = New-Lbl $Card $Title 52 14 400 22 $F_H $C_INK
+    } else {
+        $null = New-Lbl $Card $Title 18 14 400 22 $F_H $C_INK
+    }
+}
+
+function New-Tile([System.Windows.Forms.Control]$Parent, [string]$Caption, [string]$Glyph, [int]$X) {
+    $card = New-Card $Parent $X 72 162 84
+    $null = New-Lbl $card $Glyph 14 14 22 22 $F_Icon $C_ACC
+    $null = New-Lbl $card $Caption 40 15 116 18 $F_Cap $C_INK2
+    return (New-Lbl $card "○ 檢查中..." 14 44 144 26 $F_Val $C_MUTE)
 }
 
 function Set-Tile([System.Windows.Forms.Label]$Lbl, [string]$Text, [System.Drawing.Color]$Color) {
@@ -300,193 +552,307 @@ function Set-Tile([System.Windows.Forms.Label]$Lbl, [string]$Text, [System.Drawi
 
 function New-Rtb([System.Windows.Forms.Control]$Parent, [int]$X, [int]$Y, [int]$W, [int]$H) {
     $r = New-Object System.Windows.Forms.RichTextBox
-    $r.Location    = New-Object System.Drawing.Point($X, $Y)
-    $r.Size        = New-Object System.Drawing.Size($W, $H)
+    Set-Box $r $X $Y $W $H
     $r.ReadOnly    = $true
-    $r.BackColor   = $C_WELL
+    $r.BackColor   = $C_CARD
     $r.ForeColor   = $C_INK2
     $r.Font        = $F_Mono
     $r.BorderStyle = "None"
     $r.ScrollBars  = "Vertical"
     $Parent.Controls.Add($r)
+    [Fluent.Theme]::DarkScroll($r)
     return $r
 }
 
-# 功能開關卡：標題、一行說明、右邊一顆按鈕
-function New-ToggleCard([System.Windows.Forms.Control]$Parent, [int]$Y, [string]$Title) {
-    $card = New-Card $Parent 16 $Y 688 66
-    $null = New-Lbl $card $Title 12 8 300 18 $F_H $C_INK2
-    $lbl  = New-Lbl $card "" 12 30 500 32 $F_Cap $C_MUTE
-    $btn  = New-Btn $card "" 536 18 140 32 $B_GRAY
-    return @{ Card = $card; Lbl = $lbl; Btn = $btn }
+# 輸入框：圓角底框裡放一個無邊框 TextBox
+function New-Field([System.Windows.Forms.Control]$Parent, [int]$X, [int]$Y, [int]$W, [string]$Value) {
+    $box = New-Card $Parent $X $Y $W 32
+    $box.Radius = 4; $box.Fill = [Fluent.Theme]::Field
+    $t = New-Object System.Windows.Forms.TextBox
+    Set-Box $t 10 7 ($W - 20) 20
+    $t.BorderStyle = "None"
+    $t.BackColor   = [Fluent.Theme]::Field
+    $t.ForeColor   = $C_INK
+    $t.Font        = $F_Body
+    $t.Text        = $Value
+    $box.Controls.Add($t)
+    return $t
 }
-function Set-Toggle($T, [bool]$On, [string]$OnText, [string]$OffText, [string]$OnBtn, [string]$OffBtn) {
-    $T.Lbl.Text      = if ($On) { $OnText } else { $OffText }
-    $T.Lbl.ForeColor = if ($On) { $C_GOOD } else { $C_MUTE }
-    $T.Btn.Text      = if ($On) { $OnBtn } else { $OffBtn }
+
+# 下拉選單（只能選、不能打字）：$Items 是顯示文字，$Values 是實際存的值
+function New-Combo([System.Windows.Forms.Control]$Parent, [int]$X, [int]$Y, [int]$W, [string[]]$Items, [object[]]$Values, $Current) {
+    $c = New-Object System.Windows.Forms.ComboBox
+    $c.DropDownStyle = "DropDownList"
+    # 不用 Flat：Flat 會畫系統的白框白箭頭；標準樣式配上 DarkCombo 的深色主題，整個選單（含箭頭、展開清單）才會是深色
+    if ($dark) { $c.BackColor = [Fluent.Theme]::Field; $c.ForeColor = $C_INK }
+    $c.Font          = $F_Body
+    $c.MaxDropDownItems = 12
+    Set-Box $c $X $Y $W 30
+    $Parent.Controls.Add($c)
+    [Fluent.Theme]::DarkCombo($c)
+    Set-ComboItems $c $Items $Values $Current
+    return $c
+}
+function Set-ComboItems($C, [string[]]$Items, [object[]]$Values, $Current) {
+    $C.Items.Clear()
+    $C.Items.AddRange($Items)
+    $C.Tag = $Values
+    $idx = [Array]::IndexOf($Values, $Current)
+    $C.SelectedIndex = if ($idx -ge 0) { $idx } else { 0 }
+}
+function Get-ComboValue($C) { if ($C.SelectedIndex -ge 0) { $C.Tag[$C.SelectedIndex] } }
+
+# 功能開關卡：左邊圖示、標題、一行說明，右邊滑動開關
+function New-ToggleCard([System.Windows.Forms.Control]$Parent, [int]$Y, [string]$Glyph, [string]$Title) {
+    $card = New-Card $Parent 24 $Y 690 64
+    $null = New-Lbl $card $Glyph 18 20 24 24 $F_IconL $C_INK
+    $null = New-Lbl $card $Title 52 11 400 22 $F_H $C_INK
+    $lbl  = New-Lbl $card "" 52 33 480 28 $F_Cap $C_INK2
+    $sw   = New-Object Fluent.Toggle
+    Set-Box $sw 574 16 100 32
+    $card.Controls.Add($sw)
+    return @{ Card = $card; Lbl = $lbl; Sw = $sw }
+}
+function Set-Toggle($T, [bool]$On, [string]$Desc) {
+    $T.Sw.Checked = $On
+    $T.Lbl.Text   = $Desc
 }
 
 # ══════════════════════════════════════════════════════════════
 # 主視窗：左側選單 + 右邊四頁
 # ══════════════════════════════════════════════════════════════
 
+$NavW = 200
 $form = New-Object System.Windows.Forms.Form
 $form.Text            = "WiFi 控制台"
-$form.ClientSize      = New-Object System.Drawing.Size(880, 640)
+$form.ClientSize      = New-Object System.Drawing.Size(($NavW + 740), 700)
 $form.FormBorderStyle = "FixedSingle"
 $form.MaximizeBox     = $false
 $form.StartPosition   = "CenterScreen"
-$form.BackColor       = $C_PAGE
+$form.BackColor       = [Fluent.Theme]::Window
 $form.ForeColor       = $C_INK
 $form.Font            = $F_Body
 
-$side = New-Object System.Windows.Forms.Panel
-$side.Location  = New-Object System.Drawing.Point(0, 0)
-$side.Size      = New-Object System.Drawing.Size(160, 640)
-$side.BackColor = $C_SIDE
-$form.Controls.Add($side)
-$null = New-Lbl $side "WiFi 控制台" 16 16 140 26 $F_Title $C_INK
-$lblVer = New-Lbl $side "" 16 606 140 20 $F_Cap $C_MUTE
+$logo = New-Object Fluent.Logo
+Set-Box $logo 18 16 28 28
+$form.Controls.Add($logo)
+$null   = New-Lbl $form "WiFi 控制台" 52 20 140 24 $F_H $C_INK
+$appIco = Join-Path $script:Dir 'app.ico'
+if (Test-Path $appIco) { $form.Icon = New-Object System.Drawing.Icon $appIco }
+$lblVer = New-Lbl $form "" 22 670 170 20 $F_Cap $C_MUTE
 
-$pages = @()
-$navs  = @()
-$names = '首頁', '打卡記錄', '功能開關', '關於與更新'
+# 右邊內容區：左上圓角、比視窗底色淺一點（Fluent 視窗的樣子）；往右下超出視窗，只看得到左上角的圓
+$stack = New-Card $form $NavW 0 760 720
+$stack.Radius = 8; $stack.Fill = [Fluent.Theme]::Stack
+
+$pages = @(); $navs = @()
+$names  = '首頁', '打卡記錄', '功能開關', '睡眠與電源', '關於與更新'
+$glyphs = $Icon.Home, $Icon.History, $Icon.Setting, $Icon.Moon, $Icon.Info
 for ($i = 0; $i -lt $names.Count; $i++) {
     $pg = New-Object System.Windows.Forms.Panel
-    $pg.Location  = New-Object System.Drawing.Point(160, 0)
-    $pg.Size      = New-Object System.Drawing.Size(720, 640)
-    $pg.BackColor = $C_PAGE
+    Set-Box $pg 1 8 739 692
+    $pg.BackColor = [Fluent.Theme]::Stack
     $pg.Visible   = $false
-    $form.Controls.Add($pg)
+    [Fluent.Theme]::Buffer($pg)
+    $stack.Controls.Add($pg)
+    $null = New-Lbl $pg $names[$i] 22 14 400 44 $F_Title $C_INK
     $pages += $pg
 
-    $nb = New-Btn $side "  $($names[$i])" 8 (60 + $i * 42) 144 36 $C_SIDE
-    $nb.TextAlign = "MiddleLeft"
-    $nb.Font      = $F_Nav
-    $nb.Tag.Idx   = $i
-    $nb.Add_Click({ Show-View $this.Tag.Idx })
+    $nb = New-Object Fluent.NavItem
+    $nb.Text  = $names[$i]
+    $nb.Glyph = $glyphs[$i]
+    $nb.Tag   = $i
+    Set-Box $nb 8 (64 + $i * 44) ($NavW - 16) 40
+    $nb.Add_Click({ Show-View $this.Tag })
+    $form.Controls.Add($nb)
     $navs += $nb
 }
-$pgHome, $pgLog, $pgFeat, $pgAbout = $pages
+$pgHome, $pgLog, $pgFeat, $pgPower, $pgAbout = $pages
 
 function Show-View([int]$Idx) {
     for ($i = 0; $i -lt $pages.Count; $i++) {
-        $on = ($i -eq $Idx)
-        $pages[$i].Visible = $on
-        $bg = if ($on) { $C_CARD } else { $C_SIDE }
-        $navs[$i].Tag.N     = $bg
-        $navs[$i].BackColor = $bg
-        $navs[$i].ForeColor = if ($on) { $C_INK } else { $C_MUTE }
+        $pages[$i].Visible = ($i -eq $Idx)
+        $navs[$i].Selected = ($i -eq $Idx)
     }
     switch ($Idx) {
         1 { Update-PunchList }
         2 { Update-FeatureCards }
-        3 { Update-AboutPage }
+        3 { Update-PowerPage }
+        4 { Update-AboutPage }
     }
 }
 
 # ── 首頁：狀態列 ──────────────────────────────────────────────
-$tileWifi    = New-Tile $pgHome "WIFI 連線"   16
-$tileNet     = New-Tile $pgHome "網路連通"    188
-$tileMonitor = New-Tile $pgHome "監控程序"    360
-$tilePunch   = New-Tile $pgHome "下次打卡"    532
+$tileWifi    = New-Tile $pgHome "WiFi 連線" $Icon.Wifi  24
+$tileNet     = New-Tile $pgHome "網路連通"  $Icon.Globe 200
+$tileMonitor = New-Tile $pgHome "監控程序"  $Icon.Pulse 376
+$tilePunch   = New-Tile $pgHome "下次打卡"  $Icon.Clock 552
 Set-Tile $tileNet "○ 未檢查" $C_MUTE
 
 # ── 首頁：操作 ────────────────────────────────────────────────
-$cardOp = New-Card $pgHome 16 84 688 114
-$null = New-Lbl $cardOp "操作" 12 8 200 18 $F_H $C_INK2
-$btnStart    = New-Btn $cardOp "▶  啟動監控" 12  34 158 32 $B_GREEN
-$btnStop     = New-Btn $cardOp "■  停止監控" 178 34 158 32 $B_RED
-$btnLogin    = New-Btn $cardOp "⚡ 立即登入"  344 34 158 32 $B_BLUE
-$btnCheck    = New-Btn $cardOp "◎  立即檢查" 510 34 158 32 $B_GRAY
-$btnPunch    = New-Btn $cardOp "◷  立即打卡" 12  74 656 32 $B_BLUE
+$cardOp = New-Card $pgHome 24 168 690 124
+Add-CardHead $cardOp '' "操作"
+$btnStart = New-Btn $cardOp "啟動監控" 18  46 156 32 $Icon.Play
+$btnStop  = New-Btn $cardOp "停止監控" 182 46 156 32 $Icon.Stop
+$btnLogin = New-Btn $cardOp "立即登入" 346 46 156 32 $Icon.Bolt
+$btnCheck = New-Btn $cardOp "立即檢查" 510 46 162 32 $Icon.Search
+$btnPunch = New-Btn $cardOp "立即打卡" 18  84 654 32 $Icon.Clock -Accent
 
 # ── 首頁：上次打卡 ────────────────────────────────────────────
-$cardLast = New-Card $pgHome 16 208 688 66
-$null = New-Lbl $cardLast "上次打卡" 12 8 200 18 $F_H $C_INK2
-$lblLast  = New-Lbl $cardLast "沒有紀錄" 12 32 500 24 $F_Val $C_MUTE
-$btnLastShot = New-Btn $cardLast "看截圖" 536 17 140 32 $B_GRAY
+$cardLast = New-Card $pgHome 24 304 690 72
+$null = New-Lbl $cardLast $Icon.History 18 24 24 24 $F_IconL $C_INK
+$null = New-Lbl $cardLast "上次打卡" 52 12 300 22 $F_H $C_INK
+$lblLast = New-Lbl $cardLast "沒有紀錄" 52 36 480 26 $F_Body $C_MUTE
+$btnLastShot = New-Btn $cardLast "看截圖" 554 20 120 32 $Icon.Photo
 $btnLastShot.Enabled = $false
 
 # ── 首頁：日誌 ────────────────────────────────────────────────
-$cardLog = New-Card $pgHome 16 284 688 340
-$null = New-Lbl $cardLog "監控日誌（每 3 秒更新，最後 100 行）" 12 9 380 18 $F_H $C_INK2
-$btnRefresh = New-Btn $cardLog "重新整理" 498 7 92 26 $B_GRAY
-$btnClear   = New-Btn $cardLog "清除畫面" 596 7 80 26 $B_GRAY
-$rtbLog = New-Rtb $cardLog 1 38 686 301
+$cardLog = New-Card $pgHome 24 388 690 292
+Add-CardHead $cardLog '' "監控日誌（每 3 秒更新，最後 100 行）"
+$btnRefresh = New-Btn $cardLog "重新整理" 446 10 110 30 $Icon.Refresh
+$btnClear   = New-Btn $cardLog "清除畫面" 564 10 110 30 $Icon.Clear
+$rtbLog = New-Rtb $cardLog 18 50 658 230
 $rtbLog.WordWrap = $false
 
 # ── 打卡記錄頁 ────────────────────────────────────────────────
-$cardRuns = New-Card $pgLog 16 16 688 376
-$null = New-Lbl $cardRuns "最近 60 天的打卡（點一筆看過程）" 12 9 400 18 $F_H $C_INK2
-$btnRunsRefresh = New-Btn $cardRuns "重新整理" 584 7 92 26 $B_GRAY
+$cardRuns = New-Card $pgLog 24 72 690 360
+Add-CardHead $cardRuns '' "最近 60 天的打卡（點一筆看過程）"
+$btnRunsRefresh = New-Btn $cardRuns "重新整理" 564 10 110 30 $Icon.Refresh
 $lvRuns = New-Object System.Windows.Forms.ListView
-$lvRuns.Location      = New-Object System.Drawing.Point(1, 38)
-$lvRuns.Size          = New-Object System.Drawing.Size(686, 337)
+Set-Box $lvRuns 12 50 666 298
 $lvRuns.View          = "Details"
 $lvRuns.FullRowSelect = $true
 $lvRuns.MultiSelect   = $false
 $lvRuns.HeaderStyle   = "Nonclickable"
 $lvRuns.BorderStyle   = "None"
-$lvRuns.BackColor     = $C_WELL
+$lvRuns.BackColor     = $C_CARD
 $lvRuns.ForeColor     = $C_INK2
 $lvRuns.Font          = $F_Body
-[void]$lvRuns.Columns.Add("時間", 130)
+$lvRuns.SmallImageList = New-Object System.Windows.Forms.ImageList
+$lvRuns.SmallImageList.ImageSize = New-Object System.Drawing.Size(1, 30)   # 只是用來把列高撐到 30
+[void]$lvRuns.Columns.Add("時間", 140)
 [void]$lvRuns.Columns.Add("結果", 70)
-[void]$lvRuns.Columns.Add("內容", 380)
-[void]$lvRuns.Columns.Add("截圖", 80)
-# 標題列預設是系統白底，跟深色介面不搭，自己畫；內容列照系統畫法（DrawDefault）
+[void]$lvRuns.Columns.Add("內容", 370)
+[void]$lvRuns.Columns.Add("截圖", 60)
+# 整張表自己畫：系統畫法是白底藍色選取，跟這個介面不搭
 $lvRuns.OwnerDraw = $true
 $lvRuns.Add_DrawColumnHeader({
     $_.Graphics.FillRectangle((New-Object System.Drawing.SolidBrush $C_CARD), $_.Bounds)
-    $r = $_.Bounds; $r.X += 6
+    $_.Graphics.DrawLine((New-Object System.Drawing.Pen ([Fluent.Theme]::Stroke)), $_.Bounds.Left, $_.Bounds.Bottom - 1, $_.Bounds.Right, $_.Bounds.Bottom - 1)
+    $r = $_.Bounds; $r.X += 8
     [System.Windows.Forms.TextRenderer]::DrawText($_.Graphics, $_.Header.Text, $F_Cap, $r, $C_MUTE,
         [System.Windows.Forms.TextFormatFlags]'VerticalCenter, Left')
 })
-$lvRuns.Add_DrawItem({ $_.DrawDefault = $true })
-$lvRuns.Add_DrawSubItem({ $_.DrawDefault = $true })
+$lvRuns.Add_DrawItem({ $_.DrawDefault = $false })
+$lvRuns.Add_DrawSubItem({
+    $bg = if ($_.Item.Selected) { [Fluent.Theme]::ControlHover } else { $C_CARD }
+    $_.Graphics.FillRectangle((New-Object System.Drawing.SolidBrush $bg), $_.Bounds)
+    if ($_.Item.Selected -and $_.ColumnIndex -eq 0) {
+        $_.Graphics.FillRectangle((New-Object System.Drawing.SolidBrush $C_ACC), $_.Bounds.Left, $_.Bounds.Top + 7, 3, $_.Bounds.Height - 14)
+    }
+    $fg = if ($_.ColumnIndex -eq 1) { $_.SubItem.ForeColor } elseif ($_.ColumnIndex -eq 0) { $C_INK } else { $C_INK2 }
+    $r = $_.Bounds; $r.X += 8; $r.Width -= 8
+    [System.Windows.Forms.TextRenderer]::DrawText($_.Graphics, $_.SubItem.Text, $F_Body, $r, $fg,
+        [System.Windows.Forms.TextFormatFlags]'VerticalCenter, Left, EndEllipsis')
+})
+[Fluent.Theme]::Buffer($lvRuns)
 $cardRuns.Controls.Add($lvRuns)
+[Fluent.Theme]::DarkScroll($lvRuns)
 
-$cardRunDetail = New-Card $pgLog 16 402 688 222
-$null = New-Lbl $cardRunDetail "這次的過程" 12 9 300 18 $F_H $C_INK2
-$btnRunShot = New-Btn $cardRunDetail "看截圖" 584 7 92 26 $B_GRAY
+$cardRunDetail = New-Card $pgLog 24 444 690 236
+Add-CardHead $cardRunDetail '' "這次的過程"
+$btnRunShot = New-Btn $cardRunDetail "看截圖" 564 10 110 30 $Icon.Photo
 $btnRunShot.Enabled = $false
-$rtbRun = New-Rtb $cardRunDetail 1 38 686 183
+$rtbRun = New-Rtb $cardRunDetail 18 50 658 174
 
 # ── 功能開關頁 ────────────────────────────────────────────────
 function New-ParamRow([System.Windows.Forms.Control]$Parent, [int]$Y,
                       [string]$Label, [string]$Value, [string]$Hint) {
-    $null = New-Lbl $Parent $Label 12 ($Y + 3) 180 20 $F_Body $C_INK2
-    $t = New-Object System.Windows.Forms.TextBox
-    $t.Text        = $Value
-    $t.Location    = New-Object System.Drawing.Point(196, $Y)
-    $t.Size        = New-Object System.Drawing.Size(150, 24)
-    $t.BackColor   = [System.Drawing.Color]::FromArgb(36, 36, 40)
-    $t.ForeColor   = $C_INK
-    $t.BorderStyle = "FixedSingle"
-    $Parent.Controls.Add($t)
-    $null = New-Lbl $Parent $Hint 360 ($Y + 3) 310 20 $F_Cap $C_MUTE
+    $null = New-Lbl $Parent $Label 52 ($Y + 7) 176 20 $F_Body $C_INK2
+    $t = New-Field $Parent 232 $Y 160 $Value
+    $null = New-Lbl $Parent $Hint 406 ($Y + 8) 270 20 $F_Cap $C_MUTE
     return $t
 }
 
-$grpM = New-Card $pgFeat 16 16 688 244
-$null = New-Lbl $grpM "WiFi 監控" 12 8 300 18 $F_H $C_INK2
-$lblMonState = New-Lbl $grpM "" 120 9 400 18 $F_Cap $C_MUTE
-$txSSID         = New-ParamRow $grpM 36  "SSID（WiFi 名稱）"  (Read-Setting "SSID")         "目標 WiFi 網路"
-$txPollInterval = New-ParamRow $grpM 68  "PollInterval（秒）" (Read-Setting "PollInterval") "保底輪詢間隔，預設 180"
-$txEventSleep   = New-ParamRow $grpM 100 "EventSleep（秒）"   (Read-Setting "EventSleep")   "事件掃描間隔，預設 3"
-$txDebounceSec  = New-ParamRow $grpM 132 "DebounceSec（秒）"  (Read-Setting "DebounceSec")  "重複觸發冷卻，預設 15"
-$txMaxLogKB     = New-ParamRow $grpM 164 "MaxLogKB（KB）"     (Read-Setting "MaxLogKB")     "日誌大小上限，預設 500"
+$grpM = New-Card $pgFeat 24 72 690 252
+Add-CardHead $grpM $Icon.Wifi "WiFi 監控"
+$lblMonState = New-Lbl $grpM "" 52 36 400 20 $F_Cap $C_MUTE
+$btnSave     = New-Btn $grpM "儲存參數" 554 16 120 32 $Icon.Save -Accent
+$lblSaveMsg  = New-Lbl $grpM "" 330 52 344 18 $F_Cap $C_GOOD
+$lblSaveMsg.TextAlign = "TopRight"
+# WiFi 名稱只給選、不給打：打錯一個字監控就連不上了。目前只有 guest_tung 打得了卡，以後有別的再加進清單
+$SsidChoices = @('guest_tung')
+$curSsid = Read-Setting "SSID"
+if ($curSsid -and $SsidChoices -notcontains $curSsid) { $SsidChoices += $curSsid }   # 以前手動改過的值也要留著，不然一存就被蓋掉
+$null = New-Lbl $grpM "SSID（WiFi 名稱）" 52 79 176 20 $F_Body $C_INK2
+$cbSSID = New-Combo $grpM 232 73 160 $SsidChoices $SsidChoices $curSsid
+$null = New-Lbl $grpM "目標 WiFi 網路（只能從清單選）" 406 80 270 20 $F_Cap $C_MUTE
+$txPollInterval = New-ParamRow $grpM 108 "PollInterval（秒）" (Read-Setting "PollInterval") "保底輪詢間隔，預設 180"
+$txEventSleep   = New-ParamRow $grpM 144 "EventSleep（秒）"   (Read-Setting "EventSleep")   "事件掃描間隔，預設 3"
+$txDebounceSec  = New-ParamRow $grpM 180 "DebounceSec（秒）"  (Read-Setting "DebounceSec")  "重複觸發冷卻，預設 15"
+$txMaxLogKB     = New-ParamRow $grpM 216 "MaxLogKB（KB）"     (Read-Setting "MaxLogKB")     "日誌大小上限，預設 500"
 # Portal 帳密不在這裡改：wifi-accounts.ps1 是好幾組輪流試的清單，要改直接編輯那個檔
-$btnSave    = New-Btn $grpM "儲存參數" 12 200 120 32 $B_GREEN
-$lblSaveMsg = New-Lbl $grpM "" 144 208 530 20 $F_Body $C_GOOD
 
-$tgTele  = New-ToggleCard $pgFeat 270 "Telegram 指令"
-$tgBook  = New-ToggleCard $pgFeat 344 "依班表自動打卡"
-$btnShifts = New-Btn $tgBook.Card "編輯班表" 436 18 92 32 $B_GRAY
-$tgBook.Lbl.Width = 416   # 讓出「編輯班表」的位置，不然說明文字會蓋在按鈕上
-$tgSleep = New-ToggleCard $pgFeat 418 "夜間睡眠"
-$tgUpd   = New-ToggleCard $pgFeat 492 "有新版時"
+$tgTele  = New-ToggleCard $pgFeat 336 $Icon.Send     "Telegram 指令"
+$btnTeleSetup = New-Btn $tgTele.Card "設定 Telegram" 534 16 140 32 $Icon.Edit -Accent
+$tgBook  = New-ToggleCard $pgFeat 408 $Icon.Calendar "依班表自動打卡"
+$btnShifts = New-Btn $tgBook.Card "編輯班表" 448 16 110 32 $Icon.Edit
+$btnShiftHelp = New-Btn $tgBook.Card "" 408 16 32 32 (G 0xE897)   # 「?」：教怎麼讓 Claude Code 從 OF00 截圖填班表
+$tgBook.Lbl.Width = 350   # 讓出右邊按鈕的位置，不然說明文字會蓋在按鈕上
+
+function Open-ShiftFile {
+    $csv = Join-Path $script:Dir 'data\shifts.csv'
+    if (-not (Test-Path $csv)) {
+        New-Item -ItemType Directory -Force (Split-Path $csv) | Out-Null
+        [IO.File]::WriteAllText($csv, "# 排班表：一行一天，格式「日期,班別代碼」，例如 2026-12-01,9076`r`n", (New-Object Text.UTF8Encoding $true))
+    }
+    Start-Process notepad.exe -ArgumentList "`"$csv`""
+}
+
+# 班表教學：截 OF00 班表 → 貼給 Claude Code，請它填 data\shifts.csv。提示詞可以一鍵複製
+function Show-ShiftHelp {
+    $csv = Join-Path $script:Dir 'data\shifts.csv'
+    $dlg = New-Object System.Windows.Forms.Form
+    $dlg.Text = "怎麼填班表"
+    $dlg.ClientSize = New-Object System.Drawing.Size(560, 510)
+    $dlg.FormBorderStyle = "FixedDialog"; $dlg.MaximizeBox = $false; $dlg.MinimizeBox = $false
+    $dlg.StartPosition = "CenterParent"
+    $dlg.BackColor = [Fluent.Theme]::Stack; $dlg.ForeColor = $C_INK; $dlg.Font = $F_Body
+    if ($form.Icon) { $dlg.Icon = $form.Icon }
+    $null = New-Lbl $dlg "讓 Claude Code 幫你填班表" 24 18 500 30 $F_Val $C_INK
+    $steps = @(
+        "1. 打開醫院系統的 OF00 班表，切到要填的月份。",
+        "2. 按 Win + Shift + S 截圖，把整個月框進去；日期和班別代碼都要清楚入鏡。",
+        "3. 在這個資料夾開 Claude Code，把截圖貼上（Ctrl + V），再貼上下面這段話送出。",
+        "4. Claude 寫完會列出填了哪些日期，對照截圖檢查；也可以按「開啟班表檔」自己看。"
+    )
+    for ($k = 0; $k -lt $steps.Count; $k++) { $null = New-Lbl $dlg $steps[$k] 24 (60 + $k * 42) 512 40 $F_Body $C_INK2 }
+    $null = New-Lbl $dlg "要貼給 Claude Code 的話：" 24 232 400 20 $F_Cap $C_MUTE
+    $prompt = "附圖是我的 OF00 班表截圖。請把每一天的日期和班別代碼寫進 $csv ，" +
+              "格式一行一天「yyyy-MM-dd,代碼」，例如 2026-12-01,9076。" +
+              "檔案裡已經有的日期就用截圖的覆蓋，其他行（包含 # 開頭的說明）不要動，檔案要存成 UTF-8 with BOM。" +
+              "寫完列出你填了哪些日期和代碼讓我核對，看不清楚的格子要明講，不要用猜的。"
+    $box = New-Card $dlg 24 256 512 138
+    $box.Fill = [Fluent.Theme]::Card
+    $tb = New-Object System.Windows.Forms.TextBox
+    Set-Box $tb 12 10 488 118
+    $tb.Multiline = $true; $tb.ReadOnly = $true; $tb.BorderStyle = "None"; $tb.WordWrap = $true
+    $tb.BackColor = $C_CARD; $tb.ForeColor = $C_INK; $tb.Font = $F_Body
+    $tb.Text = $prompt
+    $box.Controls.Add($tb)
+    $lblCopied = New-Lbl $dlg "" 24 462 204 20 $F_Cap $C_GOOD
+    $bCopy = New-Btn $dlg "複製這段話" 236 454 140 34 (G 0xE8C8) -Accent
+    $bCopy.Add_Click({ [System.Windows.Forms.Clipboard]::SetText($prompt); $lblCopied.Text = "✓ 已複製，貼到 Claude Code 就好" }.GetNewClosure())
+    $bOpen = New-Btn $dlg "開啟班表檔" 384 454 152 34 $Icon.Edit
+    $bOpen.Add_Click({ Open-ShiftFile })
+    $null = New-Lbl $dlg "代碼意義：9076 全天班、908 值班隔天中午下班、906 值班隔天早上下班、100/102 不用打卡。" 24 404 512 36 $F_Cap $C_MUTE
+    $dlg.ActiveControl = $bCopy   # 不然一打開焦點在提示詞框，整段會被反白
+    [Fluent.Theme]::StyleWindow($dlg)
+    [void]$dlg.ShowDialog($form)
+    $dlg.Dispose()
+}
+$btnShiftHelp.Add_Click({ Show-ShiftHelp })
+$tgUpd   = New-ToggleCard $pgFeat 480 $Icon.Sync     "有新版時自動更新"
 
 function Update-FeatureCards {
     $mRun = Test-MonitorRunning
@@ -494,46 +860,130 @@ function Update-FeatureCards {
     $lblMonState.ForeColor = if ($mRun) { $C_GOOD } else { $C_MUTE }
 
     $hasBot = Test-Path (Join-Path $script:Dir 'bot-config.ps1')
+    $tgTele.Sw.Visible    = $hasBot
+    $btnTeleSetup.Visible = -not $hasBot
     if (-not $hasBot) {
         $tgTele.Lbl.Text = "還沒設定 Telegram，設定好才能用 /punch 等指令和收打卡通知。"
-        $tgTele.Lbl.ForeColor = $C_WARN
-        $tgTele.Btn.Text = "設定 Telegram"
     } else {
-        $on = [bool](Get-TaskRow 'TelegramCommands')
+        $on  = [bool](Get-TaskRow 'TelegramCommands')
         $run = $on -and (Test-ProcRunning 'telegram-commands\.ps1')
-        Set-Toggle $tgTele $on $(if ($run) { "已開啟，正在背景接收指令。" } else { "已開啟，但現在沒在跑（登入後或一小時內會自動啟動）。" }) `
-            "已關閉：傳指令給 bot 不會有反應，預約的卡照樣會打。" "關閉" "開啟"
+        Set-Toggle $tgTele $on $(if (-not $on) { "傳指令給 bot 不會有反應，預約的卡照樣會打。" }
+                                 elseif ($run) { "正在背景接收 /punch、/status 等指令。" }
+                                 else          { "現在沒在跑，登入後或一小時內會自動啟動。" })
     }
-
-    Set-Toggle $tgBook ([bool](Get-TaskRow 'NightlyBook')) `
-        "已開啟：每晚 21:00 照 data\shifts.csv 預約隔天的卡。" "已關閉：要打卡就傳 /punch 或用 /in /off 預約。" "關閉" "開啟"
-
-    Set-Toggle $tgSleep ([bool](Get-TaskRow 'NightSleep')) `
-        "已開啟：每天 01:00 閒置 10 分鐘就睡，07:00 叫醒。`n值班夜、傳過 /sleepoff 的晚上不睡。" "已關閉：電腦不會自己睡。" "關閉" "開啟"
-
+    $book = [bool](Get-TaskRow 'NightlyBook')
+    Set-Toggle $tgBook $book $(if ($book) { "每晚 21:00 照 data\shifts.csv 預約隔天的卡。" } else { "要打卡就傳 /punch，或用 /in、/off 預約。" })
     $auto = (Read-Setting 'AutoUpdate') -eq '1'
-    Set-Toggle $tgUpd $auto "每天 09:00 有新版就自動更新，更新完 Telegram 通知。" `
-        "每天 09:00 有新版只傳 Telegram 通知，回 /update 才更新（預設）。" "改成只通知" "改成自動更新"
+    Set-Toggle $tgUpd $auto $(if ($auto) { "每天 09:00 有新版就直接更新，更新完 Telegram 通知。" } else { "每天 09:00 有新版只傳 Telegram 通知，回 /update 才更新（預設）。" })
 }
 
+# ── 睡眠與電源頁 ──────────────────────────────────────────────
+$script:Loading = $false   # 程式自己在填選單時不要觸發「使用者改了選項」
+
+# 夜間睡眠：開關＋幾點睡、幾點醒。時間存 settings.ps1 的 $SleepAt / $WakeAt（sleep.ps1 讀），開著的話重新註冊排程才會用新時間
+$tgSleep = New-ToggleCard $pgPower 72 $Icon.Moon "夜間睡眠"
+$tgSleep.Card.Height = 120
+function Get-HalfHours([string]$From, [int]$Count) {
+    0..($Count - 1) | ForEach-Object { ([datetime]"2000-01-01 $From").AddMinutes(30 * $_).ToString('HH:mm') }
+}
+$SleepOpts = @(Get-HalfHours '21:00' 13)   # 21:00–03:00
+$WakeOpts  = @(Get-HalfHours '05:00' 11)   # 05:00–10:00
+function Get-SleepSetting([string]$Name, [string]$Default) {
+    $v = Read-Param $script:SettingsFile $Name
+    if ($v -match '^([01]\d|2[0-3]):[0-5]\d$') { $v } else { $Default }
+}
+$null = New-Lbl $tgSleep.Card "幾點睡" 52 83 54 20 $F_Body $C_INK2
+$cbSleepAt = New-Combo $tgSleep.Card 110 78 96 $SleepOpts $SleepOpts '01:00'
+$null = New-Lbl $tgSleep.Card "幾點醒" 226 83 54 20 $F_Body $C_INK2
+$cbWakeAt  = New-Combo $tgSleep.Card 284 78 96 $WakeOpts $WakeOpts '07:00'
+$lblSleepMsg = New-Lbl $tgSleep.Card "" 396 83 280 20 $F_Cap $C_GOOD
+
+# Windows 電源設定：刻意不在這裡改，只顯示插電時目前的值和建議，按鈕直接打開 Windows 的設定頁讓本人自己調。
+# 有人回報關螢幕、睡眠、休眠時會打不了卡，所以建議插電時全部「從不」
+$PowerRows = @(
+    @{ Name = '關閉螢幕'; Sub = 'SUB_VIDEO'; Key = 'VIDEOIDLE' },
+    @{ Name = '睡眠';     Sub = 'SUB_SLEEP'; Key = 'STANDBYIDLE' },
+    @{ Name = '休眠';     Sub = 'SUB_SLEEP'; Key = 'HIBERNATEIDLE' }
+)
+function Format-Minutes([int]$M) {
+    if ($M -eq 0) { '從不' } elseif ($M -ge 60 -and $M % 60 -eq 0) { "$($M / 60) 小時" } else { "$M 分鐘" }
+}
+# 讀目前設定：powercfg /q 的輸出會照系統語言翻譯，但最後兩個 0x 數值固定是「插電、用電池」，單位是秒
+function Get-PowerMinutes([string]$Sub, [string]$Key) {
+    $hex = @(powercfg /q SCHEME_CURRENT $Sub $Key | Select-String '0x[0-9a-fA-F]{8}' | ForEach-Object { $_.Matches[0].Value })
+    if ($hex.Count -lt 2) { return @(-1, -1) }
+    @($hex[-2], $hex[-1]) | ForEach-Object { [int][Math]::Round([Convert]::ToInt64($_, 16) / 60) }
+}
+$cardPw = New-Card $pgPower 24 204 690 218
+Add-CardHead $cardPw (G 0xE7E8) "Windows 電源設定"
+$btnPwOpen = New-Btn $cardPw "開啟電源設定" 520 16 154 32 (G 0xE8A7) -Accent
+$null = New-Lbl $cardPw "建議：插電時「關閉螢幕」和「睡眠」都設成「從不」，也不要開休眠。" 52 40 460 20 $F_Body $C_INK
+$null = New-Lbl $cardPw ("有人回報螢幕關掉、睡著或休眠時會打不了卡，插電時讓電腦一直醒著、螢幕一直亮最穩。`n" +
+                         "按右上角的按鈕會打開 Windows 的設定頁，自己改；改完回到這裡，下面會更新成新的值。") 52 64 620 40 $F_Cap $C_INK2
+$null = New-Lbl $cardPw "目前插電時：" 52 112 200 20 $F_Cap $C_MUTE
+foreach ($r in 0..2) { $PowerRows[$r].Lbl = New-Lbl $cardPw "" 52 (134 + $r * 26) 620 22 $F_Body $C_INK2 }
+$btnPwOpen.Add_Click({ Start-Process 'ms-settings:powersleep' })
+# 從 Windows 設定頁切回來時重讀，讓使用者馬上看到改好的值
+$form.Add_Activated({ if ($pgPower.Visible) { Update-PowerPage } })
+
+function Update-PowerPage {
+    $script:Loading = $true
+    try {
+        $sleep = [bool](Get-TaskRow 'NightSleep')
+        $sAt = Get-SleepSetting 'SleepAt' '01:00'; $wAt = Get-SleepSetting 'WakeAt' '07:00'
+        Set-Toggle $tgSleep $sleep $(if ($sleep) { "$sAt 閒置 10 分鐘就睡，$wAt 叫醒；值班夜和傳過 /sleepoff 的晚上不睡。" } else { "電腦不會自己睡。有人回報睡著後打不了卡，開之前先確認早上的卡會打成。" })
+        $so = @($SleepOpts + $sAt | Select-Object -Unique); $wo = @($WakeOpts + $wAt | Select-Object -Unique)
+        Set-ComboItems $cbSleepAt $so $so $sAt
+        Set-ComboItems $cbWakeAt  $wo $wo $wAt
+        foreach ($row in $PowerRows) {
+            $ac = (Get-PowerMinutes $row.Sub $row.Key)[0]
+            if ($ac -lt 0)     { $row.Lbl.Text = "$($row.Name)：讀不到";                          $row.Lbl.ForeColor = $C_MUTE }
+            elseif ($ac -eq 0) { $row.Lbl.Text = "✓ $($row.Name)：從不";                          $row.Lbl.ForeColor = $C_GOOD }
+            else               { $row.Lbl.Text = "⚠ $($row.Name)：$(Format-Minutes $ac)（建議改成從不）"; $row.Lbl.ForeColor = $C_WARN }
+        }
+    } finally { $script:Loading = $false }
+}
+
+# 改睡覺／起床時間：至少要隔 3 小時（離起床 2 小時內就不睡了，太短等於沒睡）
+$onSleepTime = {
+    if ($script:Loading) { return }
+    $s = Get-ComboValue $cbSleepAt; $w = Get-ComboValue $cbWakeAt
+    $span = ((([TimeSpan]$w) - ([TimeSpan]$s)).TotalMinutes + 1440) % 1440
+    if ($span -lt 180) {
+        $lblSleepMsg.Text = "✕ 沒存：睡和醒至少要隔 3 小時"; $lblSleepMsg.ForeColor = $C_CRIT
+        return
+    }
+    try {
+        Write-Setting 'SleepAt' $s
+        Write-Setting 'WakeAt'  $w
+        if (Get-TaskRow 'NightSleep') { [void](Invoke-ScriptUI (Join-Path $script:Dir 'sleep.ps1') @('-Install') 30) }   # 用新時間重新註冊
+        $lblSleepMsg.Text = "✓ 已改成 $s 睡、$w 醒"; $lblSleepMsg.ForeColor = $C_GOOD
+    } catch {
+        $lblSleepMsg.Text = "✕ 存不進去：$($_.Exception.Message)"; $lblSleepMsg.ForeColor = $C_CRIT
+    }
+    Update-PowerPage
+}
+$cbSleepAt.Add_SelectedIndexChanged($onSleepTime)
+$cbWakeAt.Add_SelectedIndexChanged($onSleepTime)
+
 # ── 關於與更新頁 ──────────────────────────────────────────────
-$cardVer = New-Card $pgAbout 16 16 688 110
-$null = New-Lbl $cardVer "目前版本" 12 8 200 18 $F_H $C_INK2
-$lblCurVer = New-Lbl $cardVer "" 12 32 664 24 $F_Val $C_INK
-$btnChkUpd  = New-Btn $cardVer "檢查更新"   12  66 140 32 $B_GRAY
-$btnApply   = New-Btn $cardVer "立即更新"   160 66 140 32 $B_GREEN
-$btnRollbk  = New-Btn $cardVer "退回上一版" 308 66 140 32 $B_RED
-$lblUpdMsg  = New-Lbl $cardVer "" 460 74 220 20 $F_Cap $C_MUTE
+$cardVer = New-Card $pgAbout 24 72 690 124
+Add-CardHead $cardVer $Icon.Info "目前版本"
+$lblCurVer = New-Lbl $cardVer "" 52 38 620 24 $F_Body $C_INK2
+$btnChkUpd = New-Btn $cardVer "檢查更新"   52  76 124 32 $Icon.Search
+$btnApply  = New-Btn $cardVer "立即更新"   184 76 124 32 $Icon.Download -Accent
+$btnRollbk = New-Btn $cardVer "退回上一版" 316 76 132 32 $Icon.Undo
+$lblUpdMsg = New-Lbl $cardVer "" 460 84 214 20 $F_Cap $C_MUTE
 $btnApply.Enabled = $false
 
-$cardNew = New-Card $pgAbout 16 136 688 230
-$null = New-Lbl $cardNew "GitHub 上的新版內容" 12 9 400 18 $F_H $C_INK2
-$rtbNew = New-Rtb $cardNew 1 38 686 191
+$cardNew = New-Card $pgAbout 24 208 690 220
+Add-CardHead $cardNew '' "GitHub 上的新版內容"
+$rtbNew = New-Rtb $cardNew 18 50 658 158
 $rtbNew.Text = "按「檢查更新」看看有沒有新版。"
 
-$cardUpdLog = New-Card $pgAbout 16 376 688 248
-$null = New-Lbl $cardUpdLog "更新紀錄（data\update.log）" 12 9 400 18 $F_H $C_INK2
-$rtbUpdLog = New-Rtb $cardUpdLog 1 38 686 209
+$cardUpdLog = New-Card $pgAbout 24 440 690 240
+Add-CardHead $cardUpdLog '' "更新紀錄（data\update.log）"
+$rtbUpdLog = New-Rtb $cardUpdLog 18 50 658 178
 
 function Get-VersionLine {
     $v = @(Get-Content $script:VersionFile -Encoding UTF8 -ErrorAction SilentlyContinue)
@@ -636,6 +1086,7 @@ function Update-PunchList([bool]$Force = $false) {
         [void]$lvRuns.Items.Add($it)
     }
     $lvRuns.EndUpdate()
+    $lvRuns.Columns[3].Width = -2   # 最後一欄撐滿剩下的寬度，不然標題列右邊會露出一塊系統白底
     $rtbRun.Text = if ($script:Runs) { "點上面任一筆看這次的過程。" } else { "還沒有打卡紀錄。" }
     $btnRunShot.Enabled = $false
     Update-LastPunch
@@ -688,7 +1139,7 @@ $btnCheck.Add_Click({
     $online = Wait-JobUI $job 12
     if ($online) { Set-Tile $tileNet "● 正常" $C_GOOD }
     else         { Set-Tile $tileNet "● 無法連外" $C_CRIT }
-    $btnCheck.Enabled = $true; $btnCheck.Text = "◎  立即檢查"
+    $btnCheck.Enabled = $true; $btnCheck.Text = "立即檢查"
 })
 
 $btnRefresh.Add_Click({ Update-LogView $true })
@@ -708,19 +1159,20 @@ $btnRunShot.Add_Click({ if ($this.Tag -and (Test-Path $this.Tag)) { Start-Proces
 $btnSave.Add_Click({
     # 寫壞了監控腳本會整個跑不起來，先擋掉空白和非數字
     $bad = @(@($txPollInterval, $txEventSleep, $txDebounceSec, $txMaxLogKB) | Where-Object { $_.Text -notmatch '^[1-9]\d*$' })
-    if (-not $txSSID.Text.Trim() -or $txSSID.Text -match '"' -or $bad) {
-        $lblSaveMsg.Text      = "✕ 沒有儲存：SSID 不可空白，秒數和 KB 要填正整數"
+    $ssid = Get-ComboValue $cbSSID
+    if (-not $ssid -or $bad) {
+        $lblSaveMsg.Text      = "✕ 沒有儲存：秒數和 KB 要填正整數"
         $lblSaveMsg.ForeColor = $C_CRIT
         return
     }
     try {
-        Write-Setting "SSID"         $txSSID.Text
+        Write-Setting "SSID"         $ssid
         Write-Setting "PollInterval" $txPollInterval.Text
         Write-Setting "EventSleep"   $txEventSleep.Text
         Write-Setting "DebounceSec"  $txDebounceSec.Text
         Write-Setting "MaxLogKB"     $txMaxLogKB.Text
-        $script:SSID = $txSSID.Text
-        $lblSaveMsg.Text      = "✓ 已儲存 $(Get-Date -Format 'HH:mm:ss') — 監控幾秒內會自動套用"
+        $script:SSID = $ssid
+        $lblSaveMsg.Text      = "✓ 已儲存 $(Get-Date -Format 'HH:mm:ss')，監控幾秒內會自動套用"
         $lblSaveMsg.ForeColor = $C_GOOD
     } catch {
         $lblSaveMsg.Text      = "✕ 儲存失敗：$($_.Exception.Message)"
@@ -729,12 +1181,11 @@ $btnSave.Add_Click({
 })
 
 # 開關都只是註冊／刪除自己帳號的排程，一般權限就夠
-$tgTele.Btn.Add_Click({
-    if (-not (Test-Path (Join-Path $script:Dir 'bot-config.ps1'))) {
-        # 設定過程要在視窗裡貼金鑰，所以開看得到的視窗
-        Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$(Join-Path $script:Dir 'setup-telegram.ps1')`""
-        return
-    }
+$btnTeleSetup.Add_Click({
+    # 設定過程要在視窗裡貼金鑰，所以開看得到的視窗
+    Start-Process powershell.exe -ArgumentList "-ExecutionPolicy Bypass -File `"$(Join-Path $script:Dir 'setup-telegram.ps1')`""
+})
+$tgTele.Sw.Add_Click({
     $this.Enabled = $false
     if (Get-TaskRow 'TelegramCommands') {
         try { Unregister-ScheduledTask -TaskName TelegramCommands -Confirm:$false -ErrorAction Stop } catch {}
@@ -750,7 +1201,7 @@ $tgTele.Btn.Add_Click({
     Update-FeatureCards
 })
 
-$tgBook.Btn.Add_Click({
+$tgBook.Sw.Add_Click({
     $this.Enabled = $false
     if (Get-TaskRow 'NightlyBook') {
         try { Unregister-ScheduledTask -TaskName NightlyBook -Confirm:$false -ErrorAction Stop } catch {}
@@ -765,25 +1216,18 @@ $tgBook.Btn.Add_Click({
     $this.Enabled = $true
     Update-FeatureCards
 })
-$btnShifts.Add_Click({
-    $csv = Join-Path $script:Dir 'data\shifts.csv'
-    if (-not (Test-Path $csv)) {
-        New-Item -ItemType Directory -Force (Split-Path $csv) | Out-Null
-        [IO.File]::WriteAllText($csv, "# 排班表：一行一天，格式「日期,班別代碼」，例如 2026-12-01,9076`r`n", (New-Object Text.UTF8Encoding $true))
-    }
-    Start-Process notepad.exe -ArgumentList "`"$csv`""
-})
+$btnShifts.Add_Click({ Open-ShiftFile })
 
 # 夜間睡眠開關：開＝註冊 NightSleep/MorningWake 排程，關＝刪掉（實際動作在 sleep.ps1）
-$tgSleep.Btn.Add_Click({
+$tgSleep.Sw.Add_Click({
     $this.Enabled = $false
     $arg = if (Get-TaskRow 'NightSleep') { '-Uninstall' } else { '-Install' }
     [void](Invoke-ScriptUI (Join-Path $script:Dir 'sleep.ps1') @($arg) 30)
     $this.Enabled = $true
-    Update-FeatureCards
+    Update-PowerPage
 })
 
-$tgUpd.Btn.Add_Click({
+$tgUpd.Sw.Add_Click({
     $new = if ((Read-Setting 'AutoUpdate') -eq '1') { '0' } else { '1' }
     try { Write-Setting 'AutoUpdate' $new } catch {
         [System.Windows.Forms.MessageBox]::Show("存不進 settings.ps1：$($_.Exception.Message)", "儲存失敗") | Out-Null
@@ -866,6 +1310,7 @@ $timer.Start()
 
 $form.Add_FormClosing({ $timer.Stop() })
 
+[Fluent.Theme]::StyleWindow($form)
 Show-View 0
 Update-Status
 Update-LogView $true

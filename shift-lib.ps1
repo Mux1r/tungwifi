@@ -29,6 +29,17 @@ function Test-OncallNight {
 # 「這一晚」是哪天：往前推 6 小時。電腦 01:00 才睡，00:30 傳的 /sleepoff 要算前一晚，不然 01:00 認不得照睡
 function Get-NightOf { param([datetime]$At = (Get-Date)) $At.AddHours(-6).Date }
 
+# 夜間睡眠幾點睡、幾點醒：控制面板寫進 settings.ps1 的 $SleepAt / $WakeAt，沒設或寫壞就用 01:00 / 07:00
+function Get-SleepTimes {
+    $SleepAt = '01:00'; $WakeAt = '07:00'
+    $f = Join-Path $LibRoot 'settings.ps1'   # $LibRoot 在下面定義；呼叫時已經有值
+    $s = $SleepAt; $w = $WakeAt
+    if (Test-Path $f) { try { . $f } catch {} }
+    if ($SleepAt -notmatch '^([01]\d|2[0-3]):[0-5]\d$') { $SleepAt = $s }
+    if ($WakeAt  -notmatch '^([01]\d|2[0-3]):[0-5]\d$') { $WakeAt  = $w }
+    @{ Sleep = $SleepAt; Wake = $WakeAt }
+}
+
 # /sleepoff 寫進這個檔的是「哪一晚不睡」，過了那晚自動失效
 $SkipSleepFlag = Join-Path $PSScriptRoot 'data\skip-sleep.flag'
 function Test-SkipSleep {

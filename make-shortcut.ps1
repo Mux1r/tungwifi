@@ -25,7 +25,7 @@ foreach ($LnkPath in $LnkPaths) {
     $sc.TargetPath       = "$env:SystemRoot\System32\conhost.exe"
     $sc.Arguments        = "--headless powershell.exe -ExecutionPolicy Bypass -File `"$Target`""
     $sc.WorkingDirectory = $Dir
-    $sc.IconLocation     = "$env:SystemRoot\System32\netshell.dll,0"
+    $sc.IconLocation     = if (Test-Path "$Dir\app.ico") { "$Dir\app.ico,0" } else { "$env:SystemRoot\System32\netshell.dll,0" }   # calendar-clock 圖示
     $sc.Description      = "WiFi 監控與打卡控制面板"
     $sc.WindowStyle      = 7    # 最小化。--headless 生效時用不到，當第二層保險
     $sc.Save()

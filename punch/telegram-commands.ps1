@@ -68,7 +68,7 @@ function Get-SleepLine {
     $night = Get-NightOf
     $state = if (Test-OncallNight -Date $night) { '今晚值班，不睡' }
              elseif (Test-SkipSleep $night)     { '今晚不睡（/sleepon 恢復）' }
-             else                               { '今晚 01:00 後閒置就睡，07:00 醒（/sleepoff 今晚不睡）' }
+             else { $t = Get-SleepTimes; "今晚 $($t.Sleep) 後閒置就睡，$($t.Wake) 醒（/sleepoff 今晚不睡）" }
     "`n😴 $state"
 }
 

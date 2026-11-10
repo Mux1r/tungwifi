@@ -134,4 +134,17 @@ Assert ($r -like '*下班卡約好了*' -and $r -notlike '*找不到*') "有班�
 $r = Add-PunchBooking -Kind 'off' -Codes @{} -Now ([datetime]'2026-09-17 09:00') -DryRun
 Assert ($r -like '*找不到這張卡*' -and $r -match '17:(3[5-9]|40)') "沒班表 → 照時間排 17:35–17:40 並註明"
 
+# 夜間睡眠的安全時段（sleep.ps1 的 Test-SleepWindow）：睡覺前 15 分鐘到起床前 2 小時，可以跨午夜
+$sleepAst = [Management.Automation.Language.Parser]::ParseFile("$PSScriptRoot\..\sleep.ps1", [ref]$null, [ref]$null)
+$sleepAst.FindAll({ $args[0] -is [Management.Automation.Language.FunctionDefinitionAst] -and $args[0].Name -eq 'Test-SleepWindow' }, $true) |
+    ForEach-Object { Invoke-Expression $_.Extent.Text }
+$SleepAt = '01:00'; $WakeAt = '07:00'
+Assert (-not (Test-SleepWindow ([datetime]'2026-11-10 00:44'))) "01:00 睡：00:44 還不睡"
+Assert (Test-SleepWindow ([datetime]'2026-11-10 05:00')) "01:00 睡 07:00 醒：05:00 還可以睡"
+Assert (-not (Test-SleepWindow ([datetime]'2026-11-10 05:01'))) "01:00 睡 07:00 醒：05:01 離起床不到 2 小時，不睡"
+$SleepAt = '23:00'; $WakeAt = '07:00'
+Assert (Test-SleepWindow ([datetime]'2026-11-10 23:59')) "23:00 睡：跨午夜前可以睡"
+Assert (Test-SleepWindow ([datetime]'2026-11-10 03:30')) "23:00 睡：跨午夜後可以睡"
+Assert (-not (Test-SleepWindow ([datetime]'2026-11-10 20:00'))) "23:00 睡：20:00 不睡"
+
 Write-Host "全部通過" -ForegroundColor Green

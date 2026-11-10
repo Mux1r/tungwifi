@@ -176,6 +176,15 @@ try {
     Remove-Item $SkipFile, $NotifiedFile -ErrorAction SilentlyContinue
     Log "更新到 $($sha.Substring(0, 7))：$msg"
     Restart-Bot
+    # 已經存在的控制面板捷徑換成新圖示（只改現有的，使用者刪掉的不會被加回來）
+    if (Test-Path "$Dir\app.ico") {
+        try {
+            $ws = New-Object -ComObject WScript.Shell
+            foreach ($lnk in "$Dir\WiFi 控制面板.lnk", (Join-Path ([Environment]::GetFolderPath('Desktop')) 'WiFi 控制面板.lnk')) {
+                if (Test-Path $lnk) { $sc = $ws.CreateShortcut($lnk); $sc.IconLocation = "$Dir\app.ico,0"; $sc.Save() }
+            }
+        } catch {}
+    }
 
     if ($local) {   # 第一次跑只是記下版本，不用通知
         Send-Telegram "🔄 已更新到最新版：`n$changeText`n`n打卡有問題的話回 /rollback 退回上一版" | Out-Null
