@@ -237,41 +237,63 @@ function Invoke-CDP {
     param(
         [string]$WsUrl,
         [string]$Method,
-        [hashtable]$Params = @{}
+        [hashtable]$Params = @{},
+        [int]$TimeoutSec = 30,
+        [switch]$Quiet   # Browser.close：Chrome 常常回話前就斷線，那不算失敗，別在 log 裡嚇人
     )
-    $token = [System.Threading.CancellationToken]::None
+    # 連線、送出、接收共用一個逾時：原本用 CancellationToken.None，Chrome 不回話 ReceiveAsync 就永遠等下去，
+    # 打卡程序卡著不結束，之後的 /punch 全被當成「已經有一次打卡在進行中」（2026-10-22 別台電腦卡到當機重開）
+    $cts   = [System.Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($TimeoutSec))
+    $token = $cts.Token
     $ws    = [System.Net.WebSockets.ClientWebSocket]::new()
 
     try {
-        $ws.ConnectAsync([Uri]$WsUrl, $token).Wait(10000) | Out-Null
+        # PS 5.1 的 GetResult() 會吐出空的 VoidTaskResult 混進回傳值，要 [void] 掉
+        [void]$ws.ConnectAsync([Uri]$WsUrl, $token).GetAwaiter().GetResult()
 
         $cmd    = @{ id = 99; method = $Method; params = $Params } | ConvertTo-Json -Depth 10 -Compress
         $outBuf = [Text.Encoding]::UTF8.GetBytes($cmd)
-        $ws.SendAsync([ArraySegment[byte]]::new($outBuf),
+        [void]$ws.SendAsync([ArraySegment[byte]]::new($outBuf),
                       [System.Net.WebSockets.WebSocketMessageType]::Text,
-                      $true, $token).Wait(5000) | Out-Null
+                      $true, $token).GetAwaiter().GetResult()
 
         $chunkBuf = [byte[]]::new(65536)   # 64 KB chunk，累積至 EndOfMessage
-        $deadline = [DateTime]::Now.AddSeconds(30)
-        $response = $null
-
-        while ([DateTime]::Now -lt $deadline) {
+        while ($true) {
             $ms     = [IO.MemoryStream]::new()
             $result = $null
             do {
                 $seg    = [ArraySegment[byte]]::new($chunkBuf)
                 $result = $ws.ReceiveAsync($seg, $token).GetAwaiter().GetResult()
+                if ($result.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
+                    if (-not $Quiet) { Write-Host "  CDP $Method：Chrome 關閉了連線" -ForegroundColor Yellow }
+                    return $null
+                }
                 $ms.Write($chunkBuf, 0, $result.Count)
-            } while (-not $result.EndOfMessage -and [DateTime]::Now -lt $deadline)
+            } while (-not $result.EndOfMessage)
             $text = [Text.Encoding]::UTF8.GetString($ms.ToArray())
             $obj  = $text | ConvertFrom-Json -ErrorAction SilentlyContinue
-            if ($obj -and $obj.id -eq 99) { $response = $obj; break }
+            if ($obj -and $obj.id -eq 99) { return $obj }
         }
-        return $response
+    } catch {
+        # 逾時或斷線只回 $null，讓後面照原本的重試／回報失敗流程走
+        if (-not $Quiet) { Write-Host "  CDP $Method 失敗或逾時（${TimeoutSec}s）: $($_.Exception.Message)" -ForegroundColor Yellow }
+        return $null
     } finally {
-        try { $ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, '', $token).Wait(3000) } catch {}
+        try { $ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure, '', [System.Threading.CancellationToken]::None).Wait(3000) | Out-Null } catch {}
         $ws.Dispose()
+        $cts.Dispose()
     }
+}
+
+# 用這個打卡設定檔開的所有 Chrome（主程序、子程序都會帶設定檔路徑）。
+# 不靠 Start-Process 回傳的那個 PID：同設定檔已有 Chrome 開著時，新開的會把工作交給舊的就自己結束，PID 就對不上了
+function Get-ProfileChrome {
+    @(Get-CimInstance Win32_Process -Filter "Name='chrome.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -like "*$TempDir*" })
+}
+function Stop-ProfileChrome {
+    # /T 連子程序一起關，不然 crashpad 之類的小程序會殘留
+    Get-ProfileChrome | ForEach-Object { taskkill /T /F /PID $_.ProcessId 2>$null | Out-Null }
 }
 
 # 停止可能佔用 9222 port 的舊 Chrome 實例
@@ -281,6 +303,8 @@ if ($oldDebug) {
     Stop-Process -Id $pid2 -Force -ErrorAction SilentlyContinue
     Start-Sleep -Seconds 1
 }
+# 上次沒關乾淨、或沒開除錯埠的同設定檔 Chrome 也要關：它佔著設定檔，新開的 Chrome 會被併過去、除錯埠開不起來
+if (Get-ProfileChrome) { Stop-ProfileChrome; Start-Sleep -Seconds 1 }
 
 if (-not $ChromeExe) {
     Write-Host "  RESULT: FAIL no-chrome" -ForegroundColor Red
@@ -290,7 +314,7 @@ if (-not $ChromeExe) {
 
 # 啟動附帶 CDP 的 Chrome（獨立使用者目錄，不影響現有 Chrome）
 Write-Host "  啟動 Chrome (除錯模式)..."
-$chromeProc = Start-Process $ChromeExe -ArgumentList @(
+Start-Process $ChromeExe -ArgumentList @(
     "--remote-debugging-port=$DebugPort",
     "--user-data-dir=`"$TempDir`"",
     "--app=$PwaUrl",
@@ -298,7 +322,7 @@ $chromeProc = Start-Process $ChromeExe -ArgumentList @(
     "--no-default-browser-check",
     "--disable-sync",
     "--disable-extensions"
-) -PassThru
+)   # 不留 PID：關閉時改用 Get-ProfileChrome 找（理由見上）
 
 # 等待 Chrome CDP 就緒
 $cdpReady = $false
@@ -306,7 +330,7 @@ Write-Host "  等待 Chrome 初始化..."
 for ($i = 0; $i -lt 20; $i++) {
     Start-Sleep -Seconds 2
     try {
-        $targets = Invoke-RestMethod "http://localhost:$DebugPort/json/list" -ErrorAction Stop
+        $targets = Invoke-RestMethod "http://localhost:$DebugPort/json/list" -TimeoutSec 5 -ErrorAction Stop
         if ($targets) { $cdpReady = $true; break }
     } catch {}
     Write-Host "  等待中... ($($i * 2) 秒)"
@@ -314,6 +338,7 @@ for ($i = 0; $i -lt 20; $i++) {
 
 if (-not $cdpReady) {
     Write-Host "  Chrome CDP 無法啟動。請確認 Chrome 路徑正確。" -ForegroundColor Red
+    Stop-ProfileChrome   # 別把開到一半的 Chrome 留著佔設定檔
     exit 1
 }
 
@@ -323,7 +348,7 @@ Start-Sleep -Seconds 3   # 等待頁面載入
 # 取得頁面 WebSocket URL
 $target = $null
 for ($i = 0; $i -lt 10; $i++) {
-    $targets = Invoke-RestMethod "http://localhost:$DebugPort/json/list"
+    $targets = try { Invoke-RestMethod "http://localhost:$DebugPort/json/list" -TimeoutSec 5 } catch { $null }
     $target  = $targets | Where-Object { $_.type -eq "page" } | Select-Object -First 1
     if ($target) { break }
     Start-Sleep -Seconds 2
@@ -331,6 +356,7 @@ for ($i = 0; $i -lt 10; $i++) {
 
 if (-not $target) {
     Write-Host "  找不到 CDP 頁面目標。" -ForegroundColor Red
+    Stop-ProfileChrome
     exit 1
 }
 
@@ -358,7 +384,7 @@ $updateJs = @"
 (function(){
     var els = Array.from(document.querySelectorAll('button, a, [role="button"], div'));
     var btn = els.filter(function(e){ return e.textContent.trim() === '立即更新' && e.getClientRects().length > 0; }).pop();
-    if (btn) { btn.click(); return true; }
+    if (btn) { window.__punchPreUpdate = true; btn.click(); return true; }
     return false;
 })()
 "@
@@ -372,7 +398,8 @@ function Wait-PunchReady {
         $r = Invoke-CDP -WsUrl $WsUrl -Method "Runtime.evaluate" -Params @{
             # 打卡鈕在更新畫面底下其實一直都在，要等「立即更新」從畫面上消失才算好
         # （2026-10-18 07:49 沒等到就開始按，網頁按到一半自己重整，結果整個不見）
-        expression    = "!!document.querySelector('.punch-text') && (document.body.innerText || '').indexOf('立即更新') < 0"
+        # 再加一道：點更新前在舊頁面插的記號還在＝還沒換成新頁面，繼續等（別台電腦 2026-11-10 07:26 網路慢就撲空過）
+        expression    = "!window.__punchPreUpdate && !!document.querySelector('.punch-text') && (document.body.innerText || '').indexOf('立即更新') < 0"
             returnByValue = $true
         }
         if ($r.result.result.value -eq $true) { return $true }
@@ -394,7 +421,14 @@ if ($loginExpired) {
     Write-Host "  RESULT: FAIL login-expired" -ForegroundColor Yellow
     Write-Host "  打卡網頁的登入過期了，要重新掃 QR Code 登入。" -ForegroundColor Yellow
 }
+# 整次打卡的總期限：每次跟 Chrome 溝通雖然有逾時，但網頁整個沒反應時每步都要等滿，三輪重試可拖到近 20 分鐘，
+# 上班卡要很久才回報。過了期限就不再開新一輪（正在跑的那輪會跑完），5 分鐘後由 scheduled-punch.ps1 整套重來
+$hardStop = (Get-Date).AddMinutes(4)
 for ($attempt = 1; $attempt -le 3 -and -not $loginExpired; $attempt++) {
+if ($attempt -gt 1 -and (Get-Date) -gt $hardStop) {
+    Write-Host "  已超過 4 分鐘總期限，不再重打。" -ForegroundColor Yellow
+    break
+}
 if ($attempt -gt 1) {
     Write-Host "  第 $attempt 次重打：重新載入頁面..." -ForegroundColor Yellow
     Invoke-CDP -WsUrl $wsUrl -Method "Page.reload" -Params @{ ignoreCache = $true } | Out-Null
@@ -412,7 +446,10 @@ for ($try = 1; $try -le 2; $try++) {
 
     if (Wait-PunchReady -WsUrl $wsUrl -Seconds 30) { break }
 
-    if ($try -eq 1) {
+    if ((Get-Date) -gt $hardStop) {
+        Write-Host "  已超過總期限，不再重新載入，直接試打。" -ForegroundColor Yellow
+        break
+    } elseif ($try -eq 1) {
         Write-Host "  等不到打卡按鈕，強制重新載入頁面..." -ForegroundColor Yellow
         Invoke-CDP -WsUrl $wsUrl -Method "Page.reload" -Params @{ ignoreCache = $true } | Out-Null
         Start-Sleep -Seconds 8
@@ -435,7 +472,12 @@ $js = @"
     function label(e) { return (e.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 30) + ' <' + e.tagName.toLowerCase() + '.' + (e.className || '') + '>'; }
 
     // ── 步驟 1：點「出勤打卡」────────────────────────────
+    // 頁面剛換完可能還在 render，輪詢最多 10 秒
     var punchCard = document.querySelector('.punch-text');
+    for (var j = 0; !punchCard && j < 20; j++) {
+        await wait(500);
+        punchCard = document.querySelector('.punch-text');
+    }
     if (!punchCard) {
         return { ok: false, step: 1, msg: '找不到 .punch-text（出勤打卡按鈕）', clicked: clicked };
     }
@@ -461,11 +503,15 @@ $js = @"
     if (dryRun) {
         return { ok: true, step: 3, msg: '測試模式：步驟 1-2 成功，跳過立即打卡', dryRun: true, clicked: clicked };
     }
-    var nowBtn = document.querySelector('.btn-punch');
-    if (!nowBtn) {
-        nowBtn = Array.from(document.querySelectorAll('button')).find(function(b){
-            return b.textContent.includes('立即打卡');
-        });
+    // 網路慢時按鈕可能 3 秒後才出現（別台電腦 2026-10-21），輪詢最多約 10 秒
+    function findNowBtn() {
+        return document.querySelector('.btn-punch') ||
+            Array.from(document.querySelectorAll('button')).find(function(b){ return b.textContent.includes('立即打卡'); });
+    }
+    var nowBtn = findNowBtn();
+    for (var k = 0; !nowBtn && k < 17; k++) {
+        await wait(500);
+        nowBtn = findNowBtn();
     }
     if (!nowBtn) {
         return { ok: false, step: 3, msg: '找不到「立即打卡」按鈕（.btn-punch）', clicked: clicked };
@@ -492,7 +538,7 @@ $result = Invoke-CDP -WsUrl $wsUrl -Method "Runtime.evaluate" -Params @{
     expression    = $js
     returnByValue = $true
     awaitPromise  = $true   # 等 async function 跑完
-}
+} -TimeoutSec 60   # 四步驟各自輪詢，最壞加起來約 35 秒，30 秒不夠
 
 # 解析結果
 $val = $result.result.result.value
@@ -533,6 +579,8 @@ if ($verified -or $DryRun) { break }
 Start-Sleep -Seconds 3
 try {
     $sc    = Invoke-CDP -WsUrl $wsUrl -Method "Page.captureScreenshot" -Params @{ format = "png" }
+    # 沒拿到資料時 FromBase64String 不會報錯，而是寫出 0 位元組的空檔蓋掉舊截圖，Telegram 還會說「截圖附於下方」
+    if (-not $sc.result.data) { throw "Chrome 沒有回傳截圖資料" }
     $bytes = [Convert]::FromBase64String($sc.result.data)
     [IO.File]::WriteAllBytes($ScreenshotPath, $bytes)
     Copy-Item $ScreenshotPath "$LogDir\$(Get-Date -Format 'yyyyMMdd-HHmmss').png"
@@ -542,14 +590,16 @@ try {
 }
 
 # 截圖完成後關閉 Chrome 視窗
-try {
-    Invoke-CDP -WsUrl $wsUrl -Method "Browser.close" -Params @{} | Out-Null
+# Invoke-CDP 失敗只回 $null 不丟例外，所以改看 Chrome 有沒有真的結束。
+# 給它 10 秒自己關：硬關的話，還沒寫進設定檔的登入資料可能遺失，下次就變「登入過期」
+Invoke-CDP -WsUrl $wsUrl -Method "Browser.close" -Params @{} -TimeoutSec 5 -Quiet | Out-Null
+$closeBy = (Get-Date).AddSeconds(10)
+while ((Get-ProfileChrome).Count -and (Get-Date) -lt $closeBy) { Start-Sleep -Milliseconds 500 }
+if (Get-ProfileChrome) {
+    Stop-ProfileChrome
+    Write-Host "  Chrome 10 秒內沒自己關，已強制終止。" -ForegroundColor Yellow
+} else {
     Write-Host "  Chrome 視窗已關閉。" -ForegroundColor Green
-} catch {
-    if ($chromeProc -and -not $chromeProc.HasExited) {
-        $chromeProc.Kill()
-        Write-Host "  Chrome 程序已終止。" -ForegroundColor Green
-    }
 }
 
 Write-Host ""

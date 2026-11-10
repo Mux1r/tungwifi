@@ -60,5 +60,6 @@ try {
     # 截圖走 curl.exe：PS 5.1 手搓 multipart 太囉嗦，而中文不傳給原生 exe（caption 已在上面那則）
     # 跟著上面那則：文字有進話題，截圖就送同一個話題
     $tid = if ($thread) { @('-F', "message_thread_id=$thread") } else { @() }
-    if ($fresh) { curl.exe -s -F "chat_id=$ChatId" @tid -F "photo=@$Png" "$ApiBase/sendPhoto" | Out-Null }
+    # --max-time：網路卡住時 curl 預設會一直等，這支不結束，bot 就一直以為「打卡進行中」而擋掉之後的 /punch
+    if ($fresh) { curl.exe -s --max-time 30 -F "chat_id=$ChatId" @tid -F "photo=@$Png" "$ApiBase/sendPhoto" | Out-Null }
 } catch {}
