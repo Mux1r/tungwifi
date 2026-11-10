@@ -2,8 +2,17 @@
 # 排班表的讀法（punch/ 用它查「這天是什麼班」）和 Send-Telegram。
 #
 # 班表在 data/shifts.csv，一行一天「yyyy-MM-dd,班別代碼」，每月手動更新。
-
-$ShiftFile = Join-Path $PSScriptRoot 'data\shifts.csv'
+#
+# 進階（一般安裝用不到）：settings.ps1 可以寫 $ShiftFile、$TopicsFile 指到別的地方，
+# 給已經有自己一份班表、Telegram 話題設定的人共用同一份。只取這兩個變數，其他設定不帶出來。
+$LibRoot = $PSScriptRoot
+$ShiftFile, $TopicsFile = & {
+    $ShiftFile  = Join-Path $LibRoot 'data\shifts.csv'
+    $TopicsFile = Join-Path $LibRoot 'data\tg-topics.json'
+    $f = Join-Path $LibRoot 'settings.ps1'
+    if (Test-Path $f) { try { . $f } catch {} }
+    $ShiftFile, $TopicsFile
+}
 
 # 讀成 @{ 'yyyy-MM-dd' = '班別代碼' }。認不出格式的行（註解、空行、寫壞的行）直接跳過。
 # 代碼不准含逗號：不然「2026-09-07,9076,多打一欄」會被當成代碼「9076,多打一欄」收進來。
@@ -47,19 +56,31 @@ function Test-SkipSleep {
     (Test-Path $SkipSleepFlag) -and ((Get-Content $SkipSleepFlag -Raw).Trim() -eq $Night.ToString('yyyy-MM-dd'))
 }
 
-# 送一則 Telegram。有 data/tg-topics.json 就送進指定話題，沒有就直接送聊天室。
+# 訊息掛鉤（進階，一般安裝用不到）：有 message-hook.ps1 就把通知交給它改寫，例如換成自己喜歡的語氣。
+# 它收到 -Event（哪一種通知）、-Data（時間、哪張卡這些原始資料）、-Text（原本的訊息），印出來的字就是新訊息。
+# 它是個人檔，不進 GitHub、更新也不會蓋掉；出錯或沒印東西就用原本的訊息，通知不能因為掛鉤壞掉而不見。
+function Use-MessageHook {
+    param([string]$Text, [string]$Event, [hashtable]$Data = @{})
+    $hook = Join-Path $LibRoot 'message-hook.ps1'
+    if (-not $Event -or -not (Test-Path $hook)) { return $Text }
+    try { $t = (@(& $hook -Event $Event -Data $Data -Text $Text) -join "`n").Trim(); if ($t) { return $t } } catch {}
+    $Text
+}
+
+# 送一則 Telegram。有話題設定（data/tg-topics.json）就送進指定話題，沒有就直接送聊天室。
 # 話題讀不到或被刪了就改送沒分區的地方，訊息不能因此不見；整個送不出去也不丟錯，通知失敗不能害正事跟著失敗。
 # 回傳實際送進的話題 id（scheduled-punch.ps1 的截圖要跟著送同一個話題）。
-$LibRoot = $PSScriptRoot
 function Send-Telegram {
-    param([Parameter(Mandatory)][string]$Text, [string]$Topic, [int]$TimeoutSec = 15)
+    param([Parameter(Mandatory)][string]$Text, [string]$Topic, [int]$TimeoutSec = 15,
+          [string]$Event, [hashtable]$Data = @{})
     try {
+        $Text = Use-MessageHook -Text $Text -Event $Event -Data $Data
         $cfg = Join-Path $LibRoot 'bot-config.ps1'   # $BotToken, $AuthChatId
         if (Test-Path $cfg) { . $cfg }
         if (-not $BotToken -or -not $AuthChatId) { return }   # 沒設定 Telegram 就不送
         $api  = "https://api.telegram.org/bot$BotToken/sendMessage"
         $body = @{ chat_id = $AuthChatId; text = $Text }
-        if ($Topic) { try { $body.message_thread_id = (Get-Content (Join-Path $LibRoot 'data/tg-topics.json') -Raw | ConvertFrom-Json).$Topic } catch {} }
+        if ($Topic) { try { $body.message_thread_id = (Get-Content $TopicsFile -Raw | ConvertFrom-Json).$Topic } catch {} }
         try { Invoke-RestMethod $api -Method POST -Body $body -TimeoutSec $TimeoutSec | Out-Null; return $body.message_thread_id }
         catch { $body.Remove('message_thread_id'); Invoke-RestMethod $api -Method POST -Body $body -TimeoutSec $TimeoutSec | Out-Null }
     } catch {}

@@ -1,6 +1,6 @@
 ﻿#Requires -Version 5.1
 # 從 GitHub 抓最新版覆蓋到這個資料夾。
-# 只蓋程式檔：bot-config.ps1、wifi-accounts.ps1、settings.ps1 和 data\ 底下（班表、紀錄）是每個人自己的，一律不碰。
+# 只蓋程式檔：bot-config.ps1、wifi-accounts.ps1、settings.ps1、message-hook.ps1 和 data\ 底下（班表、紀錄）是每個人自己的，一律不碰。
 # 新版裡只要有一支腳本語法錯誤就整批不更新，免得一次壞掉大家的打卡。
 #
 # 用法：
@@ -41,7 +41,7 @@ function Log([string]$Msg) { try { Add-Content $LogFile "[$(Get-Date -Format 'yy
 . "$Dir\shift-lib.ps1"   # Send-Telegram
 
 # 這幾個是個人檔，就算哪天不小心進了 repo 也不能蓋掉本機那份
-$Personal = 'bot-config.ps1', 'wifi-accounts.ps1', 'settings.ps1'
+$Personal = 'bot-config.ps1', 'wifi-accounts.ps1', 'settings.ps1', 'message-hook.ps1'
 $AutoUpdate = 0
 if (Test-Path "$Dir\settings.ps1") { try { . "$Dir\settings.ps1" } catch {} }   # $AutoUpdate（控制面板寫入）
 

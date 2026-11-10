@@ -2,6 +2,7 @@
 bot-config.ps1
 wifi-accounts.ps1
 settings.ps1
+message-hook.ps1
 data/
 *.log
 *.lnk

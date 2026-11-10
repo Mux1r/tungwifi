@@ -32,16 +32,17 @@ if ($Install) {
 . "$PSScriptRoot\punch-lib.ps1"          # $Plans, Get-ShiftPunches, Get-PunchMoment, Register-PunchTask
 . "$PSScriptRoot\..\shift-lib.ps1"       # Read-ShiftTable、Send-Telegram
 
+# Data.Result 給 message-hook.ps1 分辨是哪一種通知（見 shift-lib.ps1 的 Use-MessageHook）
 function Send-Note {
-    param([string]$Text)
-    if ($DryRun) { Write-Host $Text; return }
-    Send-Telegram $Text -Topic schedule | Out-Null   # 送不出去也不影響，預約本身已經做完了
+    param([string]$Text, [hashtable]$Data = @{})
+    if ($DryRun) { Write-Host (Use-MessageHook -Text $Text -Event book -Data $Data); return }
+    Send-Telegram $Text -Topic schedule -Event book -Data $Data | Out-Null   # 送不出去也不影響，預約本身已經做完了
 }
 
 # ── 讀班表 ──────────────────────────────────────────────
 $codes = Read-ShiftTable
 if ($codes.Count -eq 0) {
-    Send-Note "⚠️ 班表是空的或找不到（data\shifts.csv），卡未預約。請更新班表。"
+    Send-Note "⚠️ 班表是空的或找不到（data\shifts.csv），卡未預約。請更新班表。" @{ Result = 'no-table' }
     return
 }
 
@@ -53,7 +54,7 @@ $wk   = '日一二三四五六'[[int]$day.DayOfWeek]
 $when = "$($day.ToString('MM/dd'))（$wk）"
 
 if (-not $codes.ContainsKey($key)) {
-    Send-Note "📅 班表上沒有${dayWord} ${when}的資料，${dayWord}的卡未預約。請更新班表。"
+    Send-Note "📅 班表上沒有${dayWord} ${when}的資料，${dayWord}的卡未預約。請更新班表。" @{ Result = 'no-day'; DayWord = $dayWord; When = $when }
     return
 }
 
@@ -63,7 +64,7 @@ $next = $codes[$day.AddDays(1).ToString('yyyy-MM-dd')]
 try {
     $punches = @(Get-ShiftPunches -Date $day -Code $code -NextCode $next)
 } catch {
-    Send-Note "⚠️ ${dayWord} ${when}的班別代碼「$code」無法辨識，未預約。請自行打卡。"
+    Send-Note "⚠️ ${dayWord} ${when}的班別代碼「$code」無法辨識，未預約。請自行打卡。" @{ Result = 'unknown-code'; DayWord = $dayWord; When = $when; Code = $code }
     return
 }
 
@@ -78,7 +79,7 @@ $intro = switch ($code) {
 }
 
 if ($punches.Count -eq 0) {
-    Send-Note "📅 ${intro}，不需打卡。"
+    Send-Note "📅 ${intro}，不需打卡。" @{ Result = 'rest'; DayWord = $dayWord; When = $when; Code = $code; Intro = $intro }
     return
 }
 
@@ -104,4 +105,5 @@ if ($left -le 5) {
     $text += "`n`n📖 班表剩 $left 天，請更新 data\shifts.csv。"
 }
 
-Send-Note $text
+Send-Note $text @{ Result = 'booked'; DayWord = $dayWord; When = $when; Code = $code; Intro = $intro
+                  IsOncall = $isOncall; Lines = $lines; Left = $left }

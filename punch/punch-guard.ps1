@@ -53,23 +53,26 @@ foreach ($name in 'PunchIn-Booked', 'PunchOut-Booked') {
     $shot = (Test-Path $Png) -and ((Get-Item $Png).LastWriteTime -gt $at)
     $when = $at.ToString('MM/dd HH:mm')
 
+    # $result 給 message-hook.ps1 分辨是哪一種情況
     if ($ran -and $ok) {
-        $warn = $null                                    # 打成了，安靜收工
+        $warn = $null; $result = 'ok'                    # 打成了，安靜收工
     } elseif ($ran -and $shot) {
-        $warn = "⚠️ ${label}（$when）紀錄中未出現「打卡成功」，可能未打成。請確認並手動補打。"
+        $warn = "⚠️ ${label}（$when）紀錄中未出現「打卡成功」，可能未打成。請確認並手動補打。"; $result = 'unverified'
     } elseif ($ran) {
-        $warn = "⚠️ ${label}（$when）已到時間但未產生新截圖，可能未打成。請確認並手動補打。"
+        $warn = "⚠️ ${label}（$when）已到時間但未產生新截圖，可能未打成。請確認並手動補打。"; $result = 'no-shot'
     } elseif ($now -gt $at.AddMinutes(60)) {
-        $warn = "⚠️ ${label}（$when）已到時間但排程未執行，請手動打卡並檢查排程。"
+        $warn = "⚠️ ${label}（$when）已到時間但排程未執行，請手動打卡並檢查排程。"; $result = 'not-run'
     } else {
         continue    # 還沒跑，但還在等 StartWhenAvailable 補跑（例如電腦剛開機），先別動它
     }
+    $data = @{ Result = $result; Card = $label; When = $when }
 
     if ($DryRun) {
-        Write-Host "[$name] at=$when ran=$ran ok=$ok shot=$shot → $(if ($warn) { $warn } else { '正常，不通知' })"
+        $shown = if ($warn) { Use-MessageHook -Text $warn -Event guard -Data $data } else { '正常，不通知' }
+        Write-Host "[$name] at=$when ran=$ran ok=$ok shot=$shot → $shown"
         continue
     }
-    if ($warn) { Send-Telegram $warn -Topic schedule | Out-Null }   # 送不出去也不會讓守門員自己炸掉
+    if ($warn) { Send-Telegram $warn -Topic schedule -Event guard -Data $data | Out-Null }   # 送不出去也不會讓守門員自己炸掉
     # 結案就清掉這張過期預約，免得每 5 分鐘重複唸同一件事
     Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
 }

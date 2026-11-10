@@ -29,6 +29,9 @@ $fresh = (Test-Path $Png) -and (((Get-Date) - (Get-Item $Png).LastWriteTime).Tot
 $card = $Label -replace '^預約', ''     # 「預約上班卡」→「上班卡」
 # 驗證過＝打卡網頁上真的出現「打卡成功」和剛剛的時間；按鈕都點了但沒看到這句，一樣當沒打成
 $twice = if ($retried) { '間隔 5 分鐘試了兩次，' } else { '' }
+# Result 給 message-hook.ps1 分辨是哪一種結果（見 shift-lib.ps1 的 Use-MessageHook）
+$result = if ($verified) { 'ok' } elseif ($out -match 'RESULT: FAIL login-expired') { 'login-expired' }
+          elseif ($out -match 'RESULT: FAIL no-wifi') { 'no-wifi' } elseif ($fresh) { 'unverified' } else { 'no-shot' }
 $text = if ($verified) {
     "✅ ${card}打卡成功（系統記錄 $sysTime）$(if ($retried) { '，第一次失敗，5 分鐘後重試成功' })"
 } elseif ($out -match 'RESULT: FAIL login-expired') {   # 2026-10-19：網頁停在掃 QR Code 登入的頁面
@@ -43,20 +46,24 @@ $text = if ($verified) {
 # 上班卡打完附上下班卡的預約時間，沒有預約就提醒。
 # 刻意不用 punch-lib 的 Get-PunchBooking：那支會順手 Unregister 過期的預約，而 punch-guard.ps1
 # 正是靠那張過期排程判斷「該打的卡打成了沒」，先刪掉它守門員就瞎了。
+$offAt = ''
 if ($Label -like "*上班*") {
     . "$PSScriptRoot\punch-lib.ps1"   # 只借 $TaskOut 和 Format-PunchTime，不動任何排程
     $outTask  = Get-ScheduledTask -TaskName $TaskOut -ErrorAction SilentlyContinue
     $bookedAt = if ($outTask) { [datetime]$outTask.Triggers[0].StartBoundary } else { $null }
     if ($bookedAt -and $bookedAt -gt (Get-Date)) {
-        $text += "`n🕔 下班卡已預約：$(Format-PunchTime $bookedAt)"
+        $offAt = Format-PunchTime $bookedAt
+        $text += "`n🕔 下班卡已預約：$offAt"
     } else {
         $text += "`n🕔 下班卡還沒預約，點一下就能約：`n/off（17:35 左右）`n/am_off（值班隔天 08:05 左右）`n/pm_off（值班隔天 11:35 左右）"
     }
 }
+$data = @{ Result = $result; Card = $card; Label = $Label; SysTime = $sysTime; Retried = $retried
+           Time = (Get-Date -Format 'MM/dd HH:mm'); IsIn = ($Label -like '*上班*'); OffAt = $offAt }
 
 # 通知失敗不影響打卡本身
 try {
-    $thread = Send-Telegram $text -Topic schedule
+    $thread = Send-Telegram $text -Topic schedule -Event punch -Data $data
     # 截圖走 curl.exe：PS 5.1 手搓 multipart 太囉嗦，而中文不傳給原生 exe（caption 已在上面那則）
     # 跟著上面那則：文字有進話題，截圖就送同一個話題
     $tid = if ($thread) { @('-F', "message_thread_id=$thread") } else { @() }
