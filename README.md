@@ -7,7 +7,7 @@
 - **依班表自動打卡**（選用，預設關閉）：每晚 21:00 依 `data\shifts.csv` 預約隔天的卡，時間到自動打，沒打成會提醒。
 - **夜間睡眠**（選用，預設關閉）：每天 01:00 電腦閒置就睡，07:00 自動叫醒；值班夜或傳過 `/sleepoff` 的晚上不睡。
 - **控制面板**（`wifi-dashboard.ps1`）：查看連線狀態和下次打卡時間，手動啟停監控、登入 Portal、立即打卡、修改參數、開關夜間睡眠。
-- **自動更新**（`update.ps1`）：每天早上 06:00 從 GitHub 抓最新版，有更新會傳 Telegram 通知。
+- **更新**（`update.ps1`）：每天 09:00 檢查 GitHub 有沒有新版，有的話用 Telegram 通知更新內容，回 `/update` 才更新（也可以設成自動更新）。新版有問題就回 `/rollback` 退回上一版。
 
 ## 懶人安裝
 
@@ -22,7 +22,7 @@
 9. 看到「全部裝好了」就完成。
 10. 第一次打卡前，先在控制面板按「立即打卡」一次。打卡網頁若要求登入，用手機掃 QR Code 登入，之後就會記住。
 
-裝好之後就不用再下載，每天早上會自動更新。自己的設定（Telegram 金鑰、WiFi 帳密、班表、控制面板改過的參數）都不會被更新蓋掉。
+裝好之後就不用再下載，有新版時 Telegram 會通知，回 `/update` 就更新。自己的設定（Telegram 金鑰、WiFi 帳密、班表、控制面板改過的參數）都不會被更新蓋掉。
 
 想改選項時：依班表自動打卡重跑一次 `install.cmd` 改答 `Y`/`N`；夜間睡眠可以在控制面板「設定」頁直接開關。有開依班表自動打卡的話，還要把自己的班表填進 `data\shifts.csv`（用記事本開，一行一天，例如 `2026-12-01,9076`）。
 
@@ -52,6 +52,8 @@
 | `/cancel`（或 `/取消預約`） | 取消還沒到的預約 |
 | `/sleepoff`（或 `/不睡`） | 今晚電腦不睡，明晚自動恢復（有開夜間睡眠才有用） |
 | `/sleepon`（或 `/恢復睡眠`） | 取消 `/sleepoff`，今晚照常睡 |
+| `/update`（或 `/更新`） | 更新到最新版，完成後回報這次改了什麼 |
+| `/rollback`（或 `/退版`） | 退回更新前的版本（新版打卡有問題時用），退掉的那版不會再自動裝回來 |
 
 預約會先對照班表（有填的話）找下一張真的要打的卡，例如值班日傳 `/pm_off` 會排到隔天中午；沒填班表就照時間排最近的一個。上班卡打完，如果下班卡還沒約，通知裡會附上可以直接點的預約指令。預約的卡沒打成，5 分鐘內會傳提醒。
 
@@ -85,7 +87,7 @@ powershell.exe -ExecutionPolicy Bypass -File "<資料夾>\install.ps1"
 | WiFi 監控開機自啟 | `setup-autostart.ps1`（要管理員，結尾會 `Read-Host` 問要不要立即啟動） | 排程 `WiFi-AutoLogin-Monitor`：登入時啟動＋每小時補一次，RunLevel Highest |
 | 控制面板捷徑 | `make-shortcut.ps1` | 資料夾內和桌面各一個 `WiFi 控制面板.lnk` |
 | Telegram 指令 | `punch\telegram-commands.ps1 -Install` | 排程 `TelegramCommands`：登入時啟動＋每小時補一次，常駐接收上面那些指令；沒設定 Telegram 時啟動即結束 |
-| 每天自動更新 | `update.ps1 -Install` | 排程 `AutoUpdate`：每天 06:00（錯過就開機補跑）比對 GitHub `main` 最新 commit，不同就下載 zip 覆蓋程式檔；新版有任何 `.ps1` 語法錯誤就整批不更新；紀錄在 `data\update.log` |
+| 每天檢查更新 | `update.ps1 -Install` | 排程 `AutoUpdate`：每天 09:00（電腦沒醒就醒來補跑）比對 GitHub `main` 最新 commit。預設只傳 Telegram 通知（同一版只通知一次），`settings.ps1` 設 `$AutoUpdate = 1` 才直接更新。更新時下載 zip 覆蓋程式檔，新版有任何 `.ps1` 語法錯誤就整批不更新；打卡進行中會等它結束（最多 10 分鐘）。覆蓋前把目前這版備份到 `data\backup\`，`update.ps1 -Rollback` 退回並把退掉的版本記進 `data\update-skip.txt`，不再自動裝。紀錄在 `data\update.log` |
 | 打卡檢查 | `punch\punch-guard.ps1 -Install` | 排程 `PunchGuard`：每 5 分鐘檢查預約的卡（手動 `/in`、`/off` 或依班表）有沒有打成，沒有就發 Telegram |
 | 每晚預約打卡（選用） | `punch\nightly-book.ps1 -Install` | 排程 `NightlyBook`：每天 21:00 照 `data\shifts.csv` 註冊隔天的 `PunchIn-Booked` / `PunchOut-Booked` |
 | 夜間睡眠（選用） | `sleep.ps1 -Install`／`-Uninstall` | 排程 `NightSleep`（01:00，等閒置 10 分鐘就睡，不補跑）和 `MorningWake`（07:00，WakeToRun 叫醒）；並用 `powercfg` 打開「允許喚醒計時器」（要管理員，從控制面板開可能改不到） |
@@ -118,7 +120,7 @@ Start-ScheduledTask PunchGuard; (Get-ScheduledTaskInfo PunchGuard).LastTaskResul
 
 - **個人檔不進 GitHub、自動更新也不會蓋**（見 `.gitignore`）：`wifi-accounts.ps1`（訪客 WiFi 帳密，`install.ps1` 產生）、`bot-config.ps1`（`setup-telegram.ps1` 產生）、`settings.ps1`（控制面板改過的監控參數）、`data\`（班表、紀錄、目前版本、`/sleepoff` 的旗標）。打卡的身分不在腳本裡，是打卡網頁在 Chrome 設定檔裡記住的登入狀態。
 - **參數**：`wifi-monitor.ps1` 開頭的 `$SSID`、`$PollInterval` 等是預設值；控制面板存檔只寫進 `settings.ps1`，監控程式啟動時讀它覆蓋預設值。
-- **自動更新與重開**：`update.ps1` 更新完會重開 `TelegramCommands`。WiFi 監控每 3 秒檢查自己的程式檔和 `settings.ps1`，有變就自己重開（它是管理員權限，一般權限的更新程式停不掉它）。手動更新就直接跑 `update.ps1`。推新版前先跑 `test-punch-times.ps1`，推上去隔天早上所有人都會拿到。
+- **自動更新與重開**：`update.ps1` 更新完會重開 `TelegramCommands`。WiFi 監控每 3 秒檢查自己的程式檔和 `settings.ps1`，有變就自己重開（它是管理員權限，一般權限的更新程式停不掉它）。手動更新就跑 `update.ps1 -Apply`。推新版前先跑 `test-punch-times.ps1`，推上去當天 09:00 所有人都會收到通知。
 - **依班表自動打卡預設關閉**：大多數使用者是自己傳 `/punch` 打卡。班表 `data\shifts.csv` 一行一天，格式 `yyyy-MM-dd,班別代碼`；手動預約也會參考它。剩 5 天以內時預約通知裡會提醒。21:00 那次若因關機錯過，開機後補跑時預約的是當天剩下的卡。
 - **夜間睡眠**：「這一晚」是往前推 6 小時算的，所以 00:30 傳的 `/sleepoff` 還算前一晚。01:00 那張刻意不補跑，免得整晚關機後一開機就被睡掉。Parsec 連線中不睡（遠端操作不算本機閒置）。
 - **取消預約**：Telegram 傳 `/cancel`，或刪掉排程 `PunchIn-Booked` / `PunchOut-Booked`。

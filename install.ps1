@@ -1,5 +1,5 @@
 ﻿#Requires -Version 5.1
-# 一鍵安裝：WiFi 監控開機自啟 + dashboard 捷徑 + 接收 Telegram 指令 + 每天早上自動更新；
+# 一鍵安裝：WiFi 監控開機自啟 + dashboard 捷徑 + 接收 Telegram 指令 + 每天 09:00 檢查更新；
 # 依班表自動打卡會另外問，預設不開。
 # 重跑沒關係，每一步都是覆蓋重建。
 # 每個人裝在自己的電腦、用自己的帳號，排程就裝給目前這個帳號（刻意不處理「借別人的管理員帳號」）
@@ -54,7 +54,7 @@ $steps = @(
     @{ Name = 'WiFi 監控開機自啟'; File = "$Dir\setup-autostart.ps1"; Args = @() },
     @{ Name = 'dashboard 捷徑';    File = "$Dir\make-shortcut.ps1";   Args = @() },
     @{ Name = '接收 Telegram 指令'; File = "$Dir\punch\telegram-commands.ps1"; Args = @('-Install') },
-    @{ Name = '每天早上自動更新'; File = "$Dir\update.ps1"; Args = @('-Install') },
+    @{ Name = '每天 09:00 檢查更新'; File = "$Dir\update.ps1"; Args = @('-Install') },
     # 手動 /in /off 預約的卡也要有人檢查有沒有打成，所以不管有沒有開依班表自動打卡都裝
     @{ Name = '每 5 分鐘檢查預約的卡有沒有打成'; File = "$Dir\punch\punch-guard.ps1"; Args = @('-Install') }
 )

@@ -3,6 +3,7 @@
 #   /punch 立即打卡            /in /off /am_off /pm_off 預約上班卡／下班卡
 #   /status 查預約和連線狀態   /cancel 取消預約
 #   /sleepoff 今晚不睡         /sleepon 今晚照常睡（有開夜間睡眠才有用）
+#   /update 更新到最新版       /rollback 退回上一版
 # 只聽 bot-config.ps1 裡 $AuthChatId 那個人的話，其他人傳來的一律不理。
 #
 # 用法：
@@ -81,8 +82,10 @@ $Aliases = @{
     '/cancel' = 'cancel'; '/book_cancel' = 'cancel'; '/取消預約' = 'cancel'
     '/sleepoff' = 'sleepoff'; '/nosleep' = 'sleepoff'; '/不睡' = 'sleepoff'
     '/sleepon' = 'sleepon'; '/恢復睡眠' = 'sleepon'
+    '/update' = 'update'; '/更新' = 'update'
+    '/rollback' = 'rollback'; '/退版' = 'rollback'
 }
-$Help = "可用指令：`n/punch 立即打卡`n/in 預約上班卡（08:00 前）`n/off 預約下班卡（17:30 後）`n/am_off 值班隔天早上下班卡`n/pm_off 值班隔天中午下班卡`n/status 查看預約和連線`n/cancel 取消預約`n/sleepoff 今晚不睡　/sleepon 今晚照常睡"
+$Help = "可用指令：`n/punch 立即打卡`n/in 預約上班卡（08:00 前）`n/off 預約下班卡（17:30 後）`n/am_off 值班隔天早上下班卡`n/pm_off 值班隔天中午下班卡`n/status 查看預約和連線`n/cancel 取消預約`n/sleepoff 今晚不睡　/sleepon 今晚照常睡`n/update 更新到最新版　/rollback 退回上一版"
 
 # 讓 Telegram 輸入框的「/」選單列出這幾個指令
 try {
@@ -95,7 +98,9 @@ try {
         @{ command = 'status';   description = '查看預約和連線狀態' },
         @{ command = 'cancel';   description = '取消已預約的打卡' },
         @{ command = 'sleepoff'; description = '今晚電腦不睡' },
-        @{ command = 'sleepon';  description = '今晚電腦照常睡' })
+        @{ command = 'sleepon';  description = '今晚電腦照常睡' },
+        @{ command = 'update';   description = '更新到最新版' },
+        @{ command = 'rollback'; description = '退回上一版（新版打卡有問題時）' })
     Invoke-RestMethod "$Api/setMyCommands" -Method POST -TimeoutSec 15 -ContentType 'application/json; charset=utf-8' `
         -Body ([Text.Encoding]::UTF8.GetBytes("{`"commands`":$cmds}")) | Out-Null
 } catch {}
@@ -157,6 +162,13 @@ while ($true) {
                 'sleepon' {
                     Remove-Item $SkipSleepFlag -ErrorAction SilentlyContinue
                     Reply "😴 好，今晚照常睡。$(Get-SleepLine)"
+                }
+                { $_ -in 'update', 'rollback' } {
+                    # 另開程序跑：更新完會把這支 bot 關掉重開，在這裡同步跑會把自己一起砍掉。結果由 update.ps1 自己傳
+                    Reply $(if ($action -eq 'update') { "⏳ 開始更新，完成後回報。" } else { "⏳ 開始退回上一版，完成後回報。" })
+                    $flag = if ($action -eq 'update') { '-Apply' } else { '-Rollback' }
+                    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList `
+                        "-ExecutionPolicy Bypass -NonInteractive -File `"$PSScriptRoot\..\update.ps1`" $flag"
                 }
                 default { Reply $Help }
             }
