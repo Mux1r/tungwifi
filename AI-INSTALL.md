@@ -4,8 +4,9 @@
 
 ## 前提
 
+- 電腦要放在連得到 `guest_tung` 的地方（醫院內），連不到就打不了卡。不在醫院也能先裝，但要提醒使用者。
 - Windows 10/11，Windows PowerShell 5.1（內建的 `powershell.exe`，不是 pwsh 7）。
-- 電腦要能看到 `guest_tung` 這個 WiFi（醫院內）。
+- 登入的帳號本身要是系統管理員：排程裝給目前帳號，借別人的管理員帳密會裝到別人名下。
 - 要裝好 Chrome。打卡用的是獨立的 Chrome 設定檔（`%LOCALAPPDATA%\tungwifi-punch\chrome`），新電腦第一次打卡時要在裡面掃 QR Code 登入打卡網頁一次。
 - 腳本檔有中文，PowerShell 5.1 需要 UTF-8 BOM 才讀得懂。不要用會拿掉 BOM 的方式改檔。
 
