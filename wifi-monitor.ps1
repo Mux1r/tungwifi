@@ -60,7 +60,8 @@ function Connect-WiFiSSID {
     }
     for ($i = 1; $i -le 15; $i++) {
         Start-Sleep -Seconds 2
-        if ((Get-NetConnectionProfile -ErrorAction SilentlyContinue).Name -contains $SSID) {
+        # 網路設定檔可能被 Windows 加上編號（guest_tung 4），名稱後面有「空格＋數字」也算連上
+        if ((Get-NetConnectionProfile -ErrorAction SilentlyContinue).Name -match "^$([regex]::Escape($SSID))( \d+)?$") {
             return $true
         }
     }

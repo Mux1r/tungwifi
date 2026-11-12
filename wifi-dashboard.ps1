@@ -294,13 +294,18 @@ if ($dark) {
 $T::Accent = $accent
 $C_INK = $T::Text; $C_INK2 = $T::Text2; $C_MUTE = $T::Text3; $C_ACC = $accent; $C_CARD = $T::Card
 
-$iconFont = if ((New-Object System.Drawing.Text.InstalledFontCollection).Families.Name -contains 'Segoe Fluent Icons') { 'Segoe Fluent Icons' } else { 'Segoe MDL2 Assets' }
-$F_Title = New-Object System.Drawing.Font("Segoe UI Semibold", 20)
-$F_H     = New-Object System.Drawing.Font("Segoe UI Semibold", 10)
-$F_Body  = New-Object System.Drawing.Font("Segoe UI", 10)
-$F_Cap   = New-Object System.Drawing.Font("Segoe UI", 9)
-$F_Val   = New-Object System.Drawing.Font("Segoe UI Semibold", 11)
-$F_Mono  = New-Object System.Drawing.Font("Consolas", 9.5)
+$fontNames = (New-Object System.Drawing.Text.InstalledFontCollection).Families.Name
+$iconFont = if ($fontNames -contains 'Segoe Fluent Icons') { 'Segoe Fluent Icons' } else { 'Segoe MDL2 Assets' }
+# 文字用微軟正黑體 UI：Segoe UI、Consolas 都沒有中文字，中文會被 Windows 臨時換成別的字型，
+# 筆畫細、邊緣鋸齒，看起來像解析度很低，紀錄框的最後一行也會因為行高算錯被切一半。正黑體 UI 的英數字是照 Segoe 設計的，混排不突兀
+$ui = if ($fontNames -contains 'Microsoft JhengHei UI') { 'Microsoft JhengHei UI' } else { 'Segoe UI' }
+$Bold = [System.Drawing.FontStyle]::Bold   # 正黑體 UI 沒有 Semibold，標題用粗體
+$F_Title = New-Object System.Drawing.Font($ui, 20, $Bold)
+$F_H     = New-Object System.Drawing.Font($ui, 10, $Bold)
+$F_Body  = New-Object System.Drawing.Font($ui, 10)
+$F_Cap   = New-Object System.Drawing.Font($ui, 9)
+$F_Val   = New-Object System.Drawing.Font($ui, 11, $Bold)
+$F_Mono  = New-Object System.Drawing.Font($ui, 9.5)   # 紀錄框：內容大多是中文，等寬字型反而沒中文字
 $F_Icon  = New-Object System.Drawing.Font($iconFont, 12)
 $F_IconL = New-Object System.Drawing.Font($iconFont, 16)
 $T::Body = $F_Body; $T::Icon = $F_Icon
@@ -376,7 +381,8 @@ function Test-MonitorRunning {
 
 function Get-WifiConnected {
     # ponytail: Get-NetConnectionProfile 不需定位權限；netsh 需要
-    return (Get-NetConnectionProfile -ErrorAction SilentlyContinue).Name -contains $script:SSID
+    # 同一個 SSID 連過幾次後，Windows 會把網路設定檔改名成「guest_tung 4」這種帶編號的，後面有「空格＋數字」也算
+    return [bool]((Get-NetConnectionProfile -ErrorAction SilentlyContinue).Name -match "^$([regex]::Escape($script:SSID))( \d+)?$")
 }
 
 function Get-TaskRow([string]$Name) {
@@ -606,7 +612,7 @@ function Get-ComboValue($C) { if ($C.SelectedIndex -ge 0) { $C.Tag[$C.SelectedIn
 function New-ToggleCard([System.Windows.Forms.Control]$Parent, [int]$Y, [string]$Glyph, [string]$Title) {
     $card = New-Card $Parent 24 $Y 690 64
     $null = New-Lbl $card $Glyph 18 20 24 24 $F_IconL $C_INK
-    $null = New-Lbl $card $Title 52 11 400 22 $F_H $C_INK
+    $null = New-Lbl $card $Title 52 11 340 22 $F_H $C_INK   # 別太寬：透明背景的 Label 會蓋住右邊的按鈕（班表的「?」被蓋過）
     $lbl  = New-Lbl $card "" 52 33 480 28 $F_Cap $C_INK2
     $sw   = New-Object Fluent.Toggle
     Set-Box $sw 574 16 100 32
@@ -906,31 +912,58 @@ $lblSleepMsg = New-Lbl $tgSleep.Card "" 396 83 280 20 $F_Cap $C_GOOD
 Add-Type -Namespace Win32 -Name PowrProf -MemberDefinition '[DllImport("powrprof.dll")] public static extern bool GetPwrCapabilities(byte[] caps);'
 $caps = New-Object byte[] 128   # 結構實際 72 bytes，留大一點
 $script:ModernStandby = [Win32.PowrProf]::GetPwrCapabilities($caps) -and $caps[20] -ne 0
+$script:HasLid = $caps[2] -ne 0   # LidPresent：桌機沒有蓋子，就不顯示蓋子那列
 
 # Windows 電源設定：刻意不在這裡改，只顯示插電時目前的值和建議，按鈕直接打開 Windows 的設定頁讓本人自己調。
-# 有人回報關螢幕、睡眠、休眠時會打不了卡，所以建議插電時全部「從不」
-$PowerRows = @(
-    @{ Name = '關閉螢幕'; Sub = 'SUB_VIDEO'; Key = 'VIDEOIDLE' },
-    @{ Name = '睡眠';     Sub = 'SUB_SLEEP'; Key = 'STANDBYIDLE' },
-    @{ Name = '休眠';     Sub = 'SUB_SLEEP'; Key = 'HIBERNATEIDLE' }
-)
+# 建議依睡眠種類不同（見上面 $script:ModernStandby）：
+#   兩種都要：睡眠、休眠從不；闔上蓋子不做任何事
+#   新式待命：螢幕一關就進待命，所以要「待命時網路」保持連線；沒有的話螢幕也要設從不
+#   舊式睡眠：關螢幕只是螢幕暗掉，電腦還醒著，設多少都不影響打卡
 function Format-Minutes([int]$M) {
     if ($M -eq 0) { '從不' } elseif ($M -ge 60 -and $M % 60 -eq 0) { "$($M / 60) 小時" } else { "$M 分鐘" }
 }
-# 讀目前設定：powercfg /q 的輸出會照系統語言翻譯，但最後兩個 0x 數值固定是「插電、用電池」，單位是秒
-function Get-PowerMinutes([string]$Sub, [string]$Key) {
-    $hex = @(powercfg /q SCHEME_CURRENT $Sub $Key | Select-String '0x[0-9a-fA-F]{8}' | ForEach-Object { $_.Matches[0].Value })
-    if ($hex.Count -lt 2) { return @(-1, -1) }
-    @($hex[-2], $hex[-1]) | ForEach-Object { [int][Math]::Round([Convert]::ToInt64($_, 16) / 60) }
+# 讀插電時的值：powercfg 的輸出會照系統語言翻譯，但最後兩個 0x 數值固定是「插電、用電池」。
+# 用 /qh 才讀得到隱藏的設定（待命時網路、蓋子）；讀不到回 -1
+function Get-PowerAc([string]$Sub, [string]$Key) {
+    $hex = @(powercfg /qh SCHEME_CURRENT $Sub $Key | Select-String '0x[0-9a-fA-F]{8}' | ForEach-Object { $_.Matches[0].Value })
+    if ($hex.Count -lt 2) { return -1 }
+    [int][Convert]::ToInt64($hex[-2], 16)
 }
-$cardPw = New-Card $pgPower 24 204 690 218
+# 每列回傳 @(狀態, 文字)：狀態 ok / warn / na
+function Get-PowerAdvice {
+    $scr = Get-PowerAc SUB_VIDEO VIDEOIDLE; $slp = Get-PowerAc SUB_SLEEP STANDBYIDLE
+    $hib = Get-PowerAc SUB_SLEEP HIBERNATEIDLE; $lid = Get-PowerAc SUB_BUTTONS LIDACTION
+    $net = if ($script:ModernStandby) { Get-PowerAc SUB_NONE CONNECTIVITYINSTANDBY } else { -1 }
+    $rows = @()
+    $rows += , $(if ($slp -lt 0) { 'na', '睡眠：讀不到' } elseif ($slp -eq 0) { 'ok', '睡眠：從不' } else { 'warn', "睡眠：$(Format-Minutes ([Math]::Round($slp / 60)))（建議改成從不）" })
+    $rows += , $(if ($hib -lt 0) { 'na', '休眠：讀不到' } elseif ($hib -eq 0) { 'ok', '休眠：從不' } else { 'warn', "休眠：$(Format-Minutes ([Math]::Round($hib / 60)))（建議改成從不）" })
+    if ($script:ModernStandby) {
+        $rows += , $(switch ($net) { 1 { 'ok', '待命時網路：保持連線（螢幕關掉、待命中也能打卡）' }
+                                     0 { 'warn', '待命時網路：中斷（螢幕一關就斷網；這項不好改，把關閉螢幕設成從不就好）' }
+                                     2 { 'warn', '待命時網路：由 Windows 決定（可能斷網；把關閉螢幕設成從不最保險）' }
+                                     default { 'na', '待命時網路：讀不到' } })
+        $scrTxt = if ($scr -le 0) { '從不' } else { Format-Minutes ([Math]::Round($scr / 60)) }
+        $rows += , $(if ($scr -lt 0) { 'na', '關閉螢幕：讀不到' }
+                     elseif ($scr -eq 0 -or $net -eq 1) { 'ok', "關閉螢幕：$scrTxt$(if ($scr -gt 0) { '（待命時網路有連著，可以）' })" }
+                     else { 'warn', "關閉螢幕：$scrTxt（這台螢幕一關就待命、可能斷網，建議改成從不）" })
+    } else {
+        $rows += , $(if ($scr -lt 0) { 'na', '關閉螢幕：讀不到' }
+                     else { 'ok', "關閉螢幕：$(if ($scr -eq 0) { '從不' } else { Format-Minutes ([Math]::Round($scr / 60)) })（舊式睡眠只是螢幕暗掉，不影響打卡）" })
+    }
+    if ($script:HasLid) {
+        $rows += , $(if ($lid -lt 0) { 'na', '闔上蓋子：讀不到' } elseif ($lid -eq 0) { 'ok', '闔上蓋子：不做任何事' }
+                     else { 'warn', "闔上蓋子：$(@('', '睡眠', '休眠', '關機')[[Math]::Min($lid, 3)])（建議改成「不做任何事」，在控制台的「電源選項」改）" })
+    }
+    $rows
+}
+$cardPw = New-Card $pgPower 24 204 690 290
 Add-CardHead $cardPw (G 0xE7E8) "Windows 電源設定"
 $btnPwOpen = New-Btn $cardPw "開啟電源設定" 520 16 154 32 (G 0xE8A7) -Accent
-$null = New-Lbl $cardPw "建議：插電時「關閉螢幕」和「睡眠」都設成「從不」，也不要開休眠。" 52 40 460 20 $F_Body $C_INK
-$null = New-Lbl $cardPw ("有人回報螢幕關掉、睡著或休眠時會打不了卡，插電時讓電腦一直醒著、螢幕一直亮最穩。`n" +
+$lblPwKind = New-Lbl $cardPw "" 52 40 460 20 $F_Body $C_INK
+$null = New-Lbl $cardPw ("打卡時間記得插著電。下面打勾的不用動，有 ⚠ 的照括號裡的建議改。`n" +
                          "按右上角的按鈕會打開 Windows 的設定頁，自己改；改完回到這裡，下面會更新成新的值。") 52 64 620 40 $F_Cap $C_INK2
 $null = New-Lbl $cardPw "目前插電時：" 52 112 200 20 $F_Cap $C_MUTE
-foreach ($r in 0..2) { $PowerRows[$r].Lbl = New-Lbl $cardPw "" 52 (134 + $r * 26) 620 22 $F_Body $C_INK2 }
+$PowerLbls = foreach ($r in 0..4) { New-Lbl $cardPw "" 52 (134 + $r * 28) 620 26 $F_Body $C_INK2 }
 $btnPwOpen.Add_Click({ Start-Process 'ms-settings:powersleep' })
 # 從 Windows 設定頁切回來時重讀，讓使用者馬上看到改好的值
 $form.Add_Activated({ if ($pgPower.Visible) { Update-PowerPage } })
@@ -945,11 +978,13 @@ function Update-PowerPage {
         $so = @($SleepOpts + $sAt | Select-Object -Unique); $wo = @($WakeOpts + $wAt | Select-Object -Unique)
         Set-ComboItems $cbSleepAt $so $so $sAt
         Set-ComboItems $cbWakeAt  $wo $wo $wAt
-        foreach ($row in $PowerRows) {
-            $ac = (Get-PowerMinutes $row.Sub $row.Key)[0]
-            if ($ac -lt 0)     { $row.Lbl.Text = "$($row.Name)：讀不到";                          $row.Lbl.ForeColor = $C_MUTE }
-            elseif ($ac -eq 0) { $row.Lbl.Text = "✓ $($row.Name)：從不";                          $row.Lbl.ForeColor = $C_GOOD }
-            else               { $row.Lbl.Text = "⚠ $($row.Name)：$(Format-Minutes $ac)（建議改成從不）"; $row.Lbl.ForeColor = $C_WARN }
+        $lblPwKind.Text = if ($script:ModernStandby) { "這台是新式待命：螢幕一關就待命，重點是待命時網路要連著。" } else { "這台是舊式睡眠：重點是不能睡著，螢幕關掉沒關係。" }
+        $adv = @(Get-PowerAdvice)
+        for ($r = 0; $r -lt $PowerLbls.Count; $r++) {
+            if ($r -ge $adv.Count) { $PowerLbls[$r].Text = ''; continue }
+            $st, $txt = $adv[$r]
+            $PowerLbls[$r].Text      = $(switch ($st) { 'ok' { "✓ $txt" } 'warn' { "⚠ $txt" } default { $txt } })
+            $PowerLbls[$r].ForeColor = $(switch ($st) { 'ok' { $C_GOOD } 'warn' { $C_WARN } default { $C_MUTE } })
         }
     } finally { $script:Loading = $false }
 }
