@@ -58,6 +58,7 @@ function Test-SkipSleep {
 
 # 訊息掛鉤（進階，一般安裝用不到）：有 message-hook.ps1 就把通知交給它改寫，例如換成自己喜歡的語氣。
 # 它收到 -Event（哪一種通知）、-Data（時間、哪張卡這些原始資料）、-Text（原本的訊息），印出來的字就是新訊息。
+# Event 有 punch（打卡結果）、book（每晚排卡）、guard（守門員）、test（/test 測試）、update（更新／退版，Data.Kind 分哪一種）。
 # 它是個人檔，不進 GitHub、更新也不會蓋掉；出錯或沒印東西就用原本的訊息，通知不能因為掛鉤壞掉而不見。
 function Use-MessageHook {
     param([string]$Text, [string]$Event, [hashtable]$Data = @{})

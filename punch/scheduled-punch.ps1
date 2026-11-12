@@ -31,6 +31,9 @@ $card = $Label -replace '^預約', ''     # 「預約上班卡」→「上班卡
 # /test：auto-checkin 的 -DryRun 不管成敗都回 0，要看有沒有印出 RESULT: DRYRUN（走到「立即打卡」前一步才會印）。
 # 結果另外寫，不走下面打卡的通知和 message-hook，免得被當成真的打了一張卡
 if ($DryRun) {
+    $testResult = if ($out -match 'RESULT: DRYRUN') { 'ok' } elseif ($out -match 'RESULT: FAIL login-expired') { 'login-expired' }
+                  elseif ($out -match 'RESULT: FAIL no-wifi') { 'no-wifi' } else { 'fail' }
+    $why = ($out | Select-String 'RESULT: FAIL (.+)$' | Select-Object -First 1).Matches.Groups[1].Value
     $text = if ($out -match 'RESULT: DRYRUN') {
         "🧪 測試通過：連得上 guest_tung、打卡網頁登入有效，也找得到「立即打卡」按鈕。真的打卡應該沒問題（這次沒有按下去）。"
     } elseif ($out -match 'RESULT: FAIL login-expired') {
@@ -38,11 +41,10 @@ if ($DryRun) {
     } elseif ($out -match 'RESULT: FAIL no-wifi') {
         "🧪 測試失敗：電腦連不上 guest_tung（不在醫院或訊號太弱），只有 guest_tung 能打卡。"
     } else {
-        $why = ($out | Select-String 'RESULT: FAIL (.+)$' | Select-Object -First 1).Matches.Groups[1].Value
         "🧪 測試失敗$(if ($why) { "（$why）" })：沒走到「立即打卡」那一步，真的打卡可能也會失敗。$(if ($fresh) { '截圖附在下方。' })"
     }
     try {
-        $thread = Send-Telegram $text -Topic schedule
+        $thread = Send-Telegram $text -Topic schedule -Event test -Data @{ Result = $testResult; Why = $why; HasShot = $fresh }
         $tid = if ($thread) { @('-F', "message_thread_id=$thread") } else { @() }
         if ($fresh) { curl.exe -s --max-time 30 -F "chat_id=$ChatId" @tid -F "photo=@$Png" "$ApiBase/sendPhoto" | Out-Null }
     } catch {}

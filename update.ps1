@@ -106,7 +106,7 @@ if (-not (Test-Path $SleepOffFlag)) {
             Log "夜間睡眠關不掉（可能是管理員建的排程），下次再試"   # 不寫旗標，明天再試
         } else {
             Log "夜間睡眠關掉（有人回報早上叫不醒）"
-            Send-Telegram "😴 夜間睡眠先幫你關掉了：有人回報開著的話早上電腦叫不醒、打不了卡。真的要用可以在控制面板「睡眠與電源」頁再打開。" | Out-Null
+            Send-Telegram "😴 夜間睡眠先幫你關掉了：有人回報開著的話早上電腦叫不醒、打不了卡。真的要用可以在控制面板「睡眠與電源」頁再打開。" -Event update -Data @{ Kind = 'sleep-reset' } | Out-Null
             Set-Content $SleepOffFlag (Get-Date -Format 'yyyy-MM-dd')
         }
     } else { Set-Content $SleepOffFlag (Get-Date -Format 'yyyy-MM-dd') }
@@ -115,8 +115,8 @@ if (-not (Test-Path $SleepOffFlag)) {
 # ── 退回上一版 ─────────────────────────────────────────────
 if ($Rollback) {
     $bakSha = if ((Test-Path $BackupVer) -and (Test-Path $BackupDir)) { "$(Get-Content $BackupVer -TotalCount 1)".Trim() } else { '' }
-    if (-not $bakSha) { Send-Telegram "⚠️ 沒有可以退回的版本（還沒透過新版更新過，或已經退回過了）。" | Out-Null; return }
-    if (-not (Wait-PunchIdle)) { Send-Telegram "⚠️ 打卡一直在進行中，這次沒有退版，等打卡結束再傳一次 /rollback。" | Out-Null; return }
+    if (-not $bakSha) { Send-Telegram "⚠️ 沒有可以退回的版本（還沒透過新版更新過，或已經退回過了）。" -Event update -Data @{ Kind = 'no-backup' } | Out-Null; return }
+    if (-not (Wait-PunchIdle)) { Send-Telegram "⚠️ 打卡一直在進行中，這次沒有退版，等打卡結束再傳一次 /rollback。" -Event update -Data @{ Kind = 'rollback-busy' } | Out-Null; return }
     $badSha = Get-LocalSha
     try {
         Copy-Program $BackupDir $Dir
@@ -124,10 +124,10 @@ if ($Rollback) {
         Set-Content $SkipFile $badSha   # 自動更新模式下，明天別又把這版裝回來
         Remove-Item $BackupDir, $BackupVer -Recurse -Force   # 退過就沒有「上一版」了，避免連按兩次來回跳
         Log "退回到 $($bakSha.Substring(0, 7))，跳過 $badSha"
-        Send-Telegram "⏪ 已退回上一版（$(Get-VersionLabel)）。`n這次退掉的版本不會再自動裝回來，之後有更新的版本才會再通知。" | Out-Null
+        Send-Telegram "⏪ 已退回上一版（$(Get-VersionLabel)）。`n這次退掉的版本不會再自動裝回來，之後有更新的版本才會再通知。" -Event update -Data @{ Kind = 'rolled-back'; Version = (Get-VersionLabel) } | Out-Null
     } catch {
         Log "退版失敗：$($_.Exception.Message)"
-        Send-Telegram "⚠️ 退版失敗：$($_.Exception.Message)" | Out-Null
+        Send-Telegram "⚠️ 退版失敗：$($_.Exception.Message)" -Event update -Data @{ Kind = 'rollback-fail'; Err = $_.Exception.Message } | Out-Null
     }
     Restart-Bot
     return
@@ -140,7 +140,7 @@ try {
     $sha    = $commit.sha
     $local  = Get-LocalSha
     if ($sha -eq $local) {
-        if ($Apply) { Send-Telegram "✅ 已經是最新版了。" | Out-Null }
+        if ($Apply) { Send-Telegram "✅ 已經是最新版了。" -Event update -Data @{ Kind = 'latest' } | Out-Null }
         return
     }
     $skipped = (Test-Path $SkipFile) -and ("$(Get-Content $SkipFile -TotalCount 1)".Trim() -eq $sha)
@@ -160,7 +160,7 @@ try {
     # 預設只通知；第一次跑（剛安裝）直接裝，只是把版本對齊
     if ($local -and -not $Apply -and "$AutoUpdate" -ne '1') {
         if (-not (Test-Path $NotifiedFile) -or "$(Get-Content $NotifiedFile -TotalCount 1)".Trim() -ne $sha) {
-            Send-Telegram "🆕 有新版可以更新：`n$changeText`n`n要更新就回 /update" | Out-Null
+            Send-Telegram "🆕 有新版可以更新：`n$changeText`n`n要更新就回 /update" -Event update -Data @{ Kind = 'available'; Changes = $changeText } | Out-Null
             Set-Content $NotifiedFile $sha
             Log "通知新版 $($sha.Substring(0, 7))"
         }
@@ -169,7 +169,7 @@ try {
 
     if (-not (Wait-PunchIdle)) {
         Log "打卡進行中，這次不更新"
-        if ($Apply) { Send-Telegram "⚠️ 打卡一直在進行中，這次沒有更新，等打卡結束再傳一次 /update。" | Out-Null }
+        if ($Apply) { Send-Telegram "⚠️ 打卡一直在進行中，這次沒有更新，等打卡結束再傳一次 /update。" -Event update -Data @{ Kind = 'update-busy' } | Out-Null }
         return
     }
 
@@ -210,11 +210,11 @@ try {
     }
 
     if ($local) {   # 第一次跑只是記下版本，不用通知
-        Send-Telegram "🔄 已更新到最新版：`n$changeText`n`n打卡有問題的話回 /rollback 退回上一版" | Out-Null
+        Send-Telegram "🔄 已更新到最新版：`n$changeText`n`n打卡有問題的話回 /rollback 退回上一版" -Event update -Data @{ Kind = 'updated'; Changes = $changeText } | Out-Null
     }
 } catch {
     Log "更新失敗：$($_.Exception.Message)"
-    if ($Apply) { Send-Telegram "⚠️ 更新失敗：$($_.Exception.Message)" | Out-Null }
+    if ($Apply) { Send-Telegram "⚠️ 更新失敗：$($_.Exception.Message)" -Event update -Data @{ Kind = 'update-fail'; Err = $_.Exception.Message } | Out-Null }
 } finally {
     Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
