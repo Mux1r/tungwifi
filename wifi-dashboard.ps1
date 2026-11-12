@@ -1012,23 +1012,26 @@ $cbSleepAt.Add_SelectedIndexChanged($onSleepTime)
 $cbWakeAt.Add_SelectedIndexChanged($onSleepTime)
 
 # ── 關於與更新頁 ──────────────────────────────────────────────
-$cardVer = New-Card $pgAbout 24 72 690 124
+$cardVer = New-Card $pgAbout 24 72 690 154
 Add-CardHead $cardVer $Icon.Info "目前版本"
-$lblCurVer = New-Lbl $cardVer "" 52 38 620 24 $F_Body $C_INK2
-$btnChkUpd = New-Btn $cardVer "檢查更新"   52  76 124 32 $Icon.Search
-$btnApply  = New-Btn $cardVer "立即更新"   184 76 124 32 $Icon.Download -Accent
-$btnRollbk = New-Btn $cardVer "退回上一版" 316 76 132 32 $Icon.Undo
-$lblUpdMsg = New-Lbl $cardVer "" 460 84 214 20 $F_Cap $C_MUTE
+# 版本說明是 commit 訊息第一行，常常很長：給三行高，再長就用「…」收尾
+$lblCurVer = New-Lbl $cardVer "" 52 38 620 62 $F_Body $C_INK2
+$lblCurVer.AutoEllipsis = $true
+$tipVer = New-Object System.Windows.Forms.ToolTip   # 被「…」截掉時，滑鼠停上去看完整內容
+$btnChkUpd = New-Btn $cardVer "檢查更新"   52  106 124 32 $Icon.Search
+$btnApply  = New-Btn $cardVer "立即更新"   184 106 124 32 $Icon.Download -Accent
+$btnRollbk = New-Btn $cardVer "退回上一版" 316 106 132 32 $Icon.Undo
+$lblUpdMsg = New-Lbl $cardVer "" 460 114 214 20 $F_Cap $C_MUTE
 $btnApply.Enabled = $false
 
-$cardNew = New-Card $pgAbout 24 208 690 220
+$cardNew = New-Card $pgAbout 24 238 690 205
 Add-CardHead $cardNew '' "GitHub 上的新版內容"
-$rtbNew = New-Rtb $cardNew 18 50 658 158
+$rtbNew = New-Rtb $cardNew 18 50 658 143
 $rtbNew.Text = "按「檢查更新」看看有沒有新版。"
 
-$cardUpdLog = New-Card $pgAbout 24 440 690 240
+$cardUpdLog = New-Card $pgAbout 24 455 690 225
 Add-CardHead $cardUpdLog '' "更新紀錄（data\update.log）"
-$rtbUpdLog = New-Rtb $cardUpdLog 18 50 658 178
+$rtbUpdLog = New-Rtb $cardUpdLog 18 50 658 163
 
 function Get-VersionLine {
     $v = @(Get-Content $script:VersionFile -Encoding UTF8 -ErrorAction SilentlyContinue)
@@ -1041,6 +1044,7 @@ function Get-VersionLine {
 function Update-AboutPage {
     $ver = Get-VersionLine
     $lblCurVer.Text = $ver.Label
+    $tipVer.SetToolTip($lblCurVer, $ver.Label)
     $lblVer.Text    = "版本 $(if ($ver.Sha) { $ver.Sha.Substring(0, [Math]::Min(7, $ver.Sha.Length)) } else { '?' })"
     $btnRollbk.Enabled = (Test-Path (Join-Path $script:Dir 'data\backup')) -and (Test-Path (Join-Path $script:Dir 'data\backup-version.txt'))
     $log = Join-Path $script:Dir 'data\update.log'
