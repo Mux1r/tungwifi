@@ -51,19 +51,19 @@ if (-not (Test-Path "$Dir\data\shifts.csv")) {
 }
 
 $steps = @(
-    @{ Name = 'WiFi 監控開機自啟'; File = "$Dir\setup-autostart.ps1"; Args = @() },
-    @{ Name = 'dashboard 捷徑';    File = "$Dir\make-shortcut.ps1";   Args = @() },
-    @{ Name = '接收 Telegram 指令'; File = "$Dir\punch\telegram-commands.ps1"; Args = @('-Install') },
-    @{ Name = '每天 09:00 檢查更新'; File = "$Dir\update.ps1"; Args = @('-Install') },
+    @{ Name = 'WiFi 監控開機自啟'; File = "$Dir\setup-autostart.ps1"; Args = @{} },
+    @{ Name = 'dashboard 捷徑';    File = "$Dir\make-shortcut.ps1";   Args = @{} },
+    @{ Name = '接收 Telegram 指令'; File = "$Dir\punch\telegram-commands.ps1"; Args = @{ Install = $true } },
+    @{ Name = '每天 09:00 檢查更新'; File = "$Dir\update.ps1"; Args = @{ Install = $true } },
     # 手動 /in /off 預約的卡也要有人檢查有沒有打成，所以不管有沒有開依班表自動打卡都裝
-    @{ Name = '每 5 分鐘檢查預約的卡有沒有打成'; File = "$Dir\punch\punch-guard.ps1"; Args = @('-Install') }
+    @{ Name = '每 5 分鐘檢查預約的卡有沒有打成'; File = "$Dir\punch\punch-guard.ps1"; Args = @{ Install = $true } }
 )
 # 依班表自動打卡：大多數人是自己傳 /punch 打卡，預設不開。重跑安裝選 N 就是關掉
 Write-Host "`n依班表自動打卡：每晚 21:00 照 data\shifts.csv 預約隔天的卡，時間到自動打。" -ForegroundColor Cyan
 Write-Host "只想自己用 /punch 或控制面板打卡的話，選 N 就好。"
 $auto = (Read-Host "開啟依班表自動打卡? (Y/N，預設 N)") -match '^[Yy]'
 if ($auto) {
-    $steps += @{ Name = '每晚 21:00 預約打卡'; File = "$Dir\punch\nightly-book.ps1"; Args = @('-Install') }
+    $steps += @{ Name = '每晚 21:00 預約打卡'; File = "$Dir\punch\nightly-book.ps1"; Args = @{ Install = $true } }
 } else {
     Unregister-ScheduledTask -TaskName NightlyBook -Confirm:$false -ErrorAction SilentlyContinue
 }
@@ -74,7 +74,10 @@ foreach ($s in $steps) {
     Write-Host "`n== $($s.Name)" -ForegroundColor Cyan
     $global:LASTEXITCODE = 0
     try {
-        & $s.File @($s.Args)
+        # 一定要用 hashtable splatting：陣列 @('-Install') 傳給 .ps1 在 PowerShell 5.1 不會綁到 [switch]$Install，
+        # 子腳本會跑成主程式（telegram-commands 會在前景常駐、安裝卡死）
+        $a = $s.Args
+        & $s.File @a
         if ($LASTEXITCODE) { $failed += $s.Name }   # 子腳本用 exit 1 回報失敗
     } catch {
         Write-Host "  [錯誤] $($_.Exception.Message)" -ForegroundColor Red

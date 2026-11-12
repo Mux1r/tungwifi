@@ -1,13 +1,15 @@
 ﻿#Requires -Version 5.1
 # ============================================================
 #  自動打卡腳本 v2 - 含 Chrome CDP 自動點擊打卡按鈕
-#  用法: auto-checkin-v2.ps1 [-Silent] [-DryRun]
+#  用法: auto-checkin-v2.ps1 [-Silent] [-DryRun] [-Open]
 #        平常由 scheduled-punch.ps1 呼叫；-DryRun 只走到「立即打卡」前一步
+#        -Open 只用打卡的 Chrome 設定檔打開打卡網頁讓人登入（控制面板「打開打卡網頁」），不打卡
 # ============================================================
 
 param(
     [switch]$Silent,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [switch]$Open
 )
 
 $SSID      = "guest_tung"
@@ -28,6 +30,13 @@ $DebugPort      = 9222
 # 2026-10-18 下午被清掉一次，隔天下班卡就停在「行動登入」掃 QR Code 的頁面打不成
 $TempDir        = "$env:LOCALAPPDATA\tungwifi-punch\chrome"
 $ScreenshotPath = "$PSScriptRoot\checkin-screenshot.png"
+
+if ($Open) {
+    if (-not $ChromeExe) { Write-Host "找不到 Chrome，請先安裝 Google Chrome。" -ForegroundColor Red; exit 1 }
+    # 不開除錯埠：只是給人登入用，登入狀態存進同一個設定檔，之後自動打卡就認得
+    Start-Process $ChromeExe -ArgumentList "--user-data-dir=`"$TempDir`"", "--app=$PwaUrl", '--no-first-run', '--no-default-browser-check'
+    exit
+}
 
 # 整段過程錄進 data/punch-logs/<年月>.log，截圖也留一份；不然事後只剩一張會被蓋掉的截圖可查
 # （2026-10-07 那張沒打成的卡，六天後回頭查已經什麼都沒有了）

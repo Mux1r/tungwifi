@@ -696,7 +696,8 @@ $btnStart = New-Btn $cardOp "啟動監控" 18  46 156 32 $Icon.Play
 $btnStop  = New-Btn $cardOp "停止監控" 182 46 156 32 $Icon.Stop
 $btnLogin = New-Btn $cardOp "立即登入" 346 46 156 32 $Icon.Bolt
 $btnCheck = New-Btn $cardOp "立即檢查" 510 46 162 32 $Icon.Search
-$btnPunch = New-Btn $cardOp "立即打卡" 18  84 654 32 $Icon.Clock -Accent
+$btnPunch = New-Btn $cardOp "立即打卡" 18  84 320 32 $Icon.Clock -Accent
+$btnPunchWeb = New-Btn $cardOp "打開打卡網頁（登入用）" 346 84 326 32 $Icon.Globe
 
 # ── 首頁：上次打卡 ────────────────────────────────────────────
 $cardLast = New-Card $pgHome 24 304 690 72
@@ -1128,6 +1129,12 @@ $btnPunch.Add_Click({
         Start-Process powershell.exe -WindowStyle Normal `
             -ArgumentList "-ExecutionPolicy Bypass -File `"$script:CheckinScript`""
     }
+})
+
+# 用自動打卡同一個 Chrome 設定檔開打卡網頁：登入過期（要重新掃 QR Code）時在這裡登入，之後自動打卡就認得
+$btnPunchWeb.Add_Click({
+    Start-Process powershell.exe -WindowStyle Hidden `
+        -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$script:CheckinScript`" -Open"
 })
 
 $btnCheck.Add_Click({

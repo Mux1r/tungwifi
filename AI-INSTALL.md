@@ -52,7 +52,7 @@ Start-Process "$env:USERPROFILE\Documents\tungwifi\install.cmd"
 4. 現在設定 Telegram？`Y`，然後陪使用者建 bot：Telegram 搜尋 @BotFather（藍勾勾）→ 按開始 → 傳 `/newbot` → 取顯示名稱 → 取以 `bot` 結尾的帳號 → 把 BotFather 回的金鑰整串複製、貼回視窗 → 到 Telegram 搜尋自己的 bot 按「開始」→ 視窗顯示「設定完成」並收到測試訊息。
 5. 看到「全部裝好了」就完成。
 
-最後提醒使用者：在控制面板按一次「立即打卡」，打卡網頁要登入就用手機掃 QR Code。金鑰等於 bot 的密碼，不要傳給別人。
+最後提醒使用者：在控制面板按「打開打卡網頁（登入用）」，用手機掃 QR Code 登入。金鑰等於 bot 的密碼，不要傳給別人。
 
 ### 4. 驗證
 
