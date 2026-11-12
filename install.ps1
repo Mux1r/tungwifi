@@ -68,10 +68,7 @@ if ($auto) {
     Unregister-ScheduledTask -TaskName NightlyBook -Confirm:$false -ErrorAction SilentlyContinue
 }
 
-# 夜間睡眠：預設不開。重跑安裝選 N 就是關掉；之後也可以在控制面板「設定」頁開關
-Write-Host "`n夜間睡眠：每天 01:00 電腦閒置 10 分鐘就睡，07:00 自動叫醒（值班夜、傳過 /sleepoff 的晚上不睡）。" -ForegroundColor Cyan
-$sleep = (Read-Host "開啟夜間睡眠? (Y/N，預設 N)") -match '^[Yy]'
-$steps += @{ Name = '夜間睡眠'; File = "$Dir\sleep.ps1"; Args = @($(if ($sleep) { '-Install' } else { '-Uninstall' })) }
+# 夜間睡眠安裝時不問也不開：有人回報睡著後早上叫不醒、打不了卡。真的要用再從控制面板「睡眠與電源」頁開
 $failed = @()
 foreach ($s in $steps) {
     Write-Host "`n== $($s.Name)" -ForegroundColor Cyan

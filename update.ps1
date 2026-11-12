@@ -201,3 +201,15 @@ try {
     $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop
     if ($t.Triggers[0].StartBoundary -notmatch 'T09:00') { & $PSCommandPath -Install | Out-Null; Log "排程改到 09:00" }
 } catch {}
+
+# 有人回報夜間睡眠開著，早上叫不醒、打不了卡，所以幫已經開的人關掉一次。
+# 只做一次（留旗標），之後自己從控制面板再打開就不會再被關；只動本專案的 NightSleep / MorningWake
+$SleepOffFlag = "$Dir\data\sleep-reset.done"
+if (-not (Test-Path $SleepOffFlag)) {
+    if (Get-ScheduledTask -TaskName NightSleep -ErrorAction SilentlyContinue) {
+        & "$Dir\sleep.ps1" -Uninstall | Out-Null
+        Log "夜間睡眠關掉（有人回報早上叫不醒）"
+        Send-Telegram "😴 夜間睡眠先幫你關掉了：有人回報開著的話早上電腦叫不醒、打不了卡。真的要用可以在控制面板「睡眠與電源」頁再打開。" | Out-Null
+    }
+    Set-Content $SleepOffFlag (Get-Date -Format 'yyyy-MM-dd')
+}

@@ -883,6 +883,7 @@ $script:Loading = $false   # 程式自己在填選單時不要觸發「使用者
 # 夜間睡眠：開關＋幾點睡、幾點醒。時間存 settings.ps1 的 $SleepAt / $WakeAt（sleep.ps1 讀），開著的話重新註冊排程才會用新時間
 $tgSleep = New-ToggleCard $pgPower 72 $Icon.Moon "夜間睡眠"
 $tgSleep.Card.Height = 120
+$tgSleep.Lbl.Height = 42   # 說明多一句睡眠種類，要兩行
 function Get-HalfHours([string]$From, [int]$Count) {
     0..($Count - 1) | ForEach-Object { ([datetime]"2000-01-01 $From").AddMinutes(30 * $_).ToString('HH:mm') }
 }
@@ -897,6 +898,13 @@ $cbSleepAt = New-Combo $tgSleep.Card 110 78 96 $SleepOpts $SleepOpts '01:00'
 $null = New-Lbl $tgSleep.Card "幾點醒" 226 83 54 20 $F_Body $C_INK2
 $cbWakeAt  = New-Combo $tgSleep.Card 284 78 96 $WakeOpts $WakeOpts '07:00'
 $lblSleepMsg = New-Lbl $tgSleep.Card "" 396 83 280 20 $F_Cap $C_GOOD
+
+# 這台電腦是不是「新式待命」（Modern Standby）：新式的睡著時網路還連著、排程照跑，打卡不用叫醒；
+# 舊式的是真的睡死，要靠喚醒計時器叫醒，常常叫不醒或醒了又睡回去，打不了卡。
+# 讀 GetPwrCapabilities 回傳結構第 20 個位元組（AoAc 欄位）；powercfg /a 的文字會照系統語言翻譯，不好判斷
+Add-Type -Namespace Win32 -Name PowrProf -MemberDefinition '[DllImport("powrprof.dll")] public static extern bool GetPwrCapabilities(byte[] caps);'
+$caps = New-Object byte[] 128   # 結構實際 72 bytes，留大一點
+$script:ModernStandby = [Win32.PowrProf]::GetPwrCapabilities($caps) -and $caps[20] -ne 0
 
 # Windows 電源設定：刻意不在這裡改，只顯示插電時目前的值和建議，按鈕直接打開 Windows 的設定頁讓本人自己調。
 # 有人回報關螢幕、睡眠、休眠時會打不了卡，所以建議插電時全部「從不」
@@ -931,7 +939,8 @@ function Update-PowerPage {
     try {
         $sleep = [bool](Get-TaskRow 'NightSleep')
         $sAt = Get-SleepSetting 'SleepAt' '01:00'; $wAt = Get-SleepSetting 'WakeAt' '07:00'
-        Set-Toggle $tgSleep $sleep $(if ($sleep) { "$sAt 閒置 10 分鐘就睡，$wAt 叫醒；值班夜和傳過 /sleepoff 的晚上不睡。" } else { "電腦不會自己睡。有人回報睡著後打不了卡，開之前先確認早上的卡會打成。" })
+        $kind = if ($script:ModernStandby) { "這台是新式待命，睡著也照常打卡。" } else { "⚠ 這台是舊式睡眠，睡著後常叫不醒、打不了卡，不建議開。" }
+        Set-Toggle $tgSleep $sleep $(if ($sleep) { "$sAt 閒置 10 分鐘就睡，$wAt 叫醒；值班夜和傳過 /sleepoff 的晚上不睡。$kind" } else { "電腦不會自己睡。$kind" })
         $so = @($SleepOpts + $sAt | Select-Object -Unique); $wo = @($WakeOpts + $wAt | Select-Object -Unique)
         Set-ComboItems $cbSleepAt $so $so $sAt
         Set-ComboItems $cbWakeAt  $wo $wo $wAt
@@ -1222,6 +1231,14 @@ $btnShifts.Add_Click({ Open-ShiftFile })
 $tgSleep.Sw.Add_Click({
     $this.Enabled = $false
     $arg = if (Get-TaskRow 'NightSleep') { '-Uninstall' } else { '-Install' }
+    # 舊式睡眠的電腦要開之前先警告，預設按鈕是「否」
+    if ($arg -eq '-Install' -and -not $script:ModernStandby) {
+        $r = [System.Windows.Forms.MessageBox]::Show(
+            "這台電腦是舊式睡眠：睡著後網路會斷、程式全停，要靠排程叫醒，常常叫不醒或醒了又睡回去，早上就打不了卡。`n`n不建議開。確定還是要開？",
+            "夜間睡眠", [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Warning,
+            [System.Windows.Forms.MessageBoxDefaultButton]::Button2)
+        if ($r -ne [System.Windows.Forms.DialogResult]::Yes) { $this.Enabled = $true; return }
+    }
     [void](Invoke-ScriptUI (Join-Path $script:Dir 'sleep.ps1') @($arg) 30)
     $this.Enabled = $true
     Update-PowerPage
