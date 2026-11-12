@@ -900,7 +900,7 @@ $null = New-Lbl $tgSleep.Card "幾點醒" 226 83 54 20 $F_Body $C_INK2
 $cbWakeAt  = New-Combo $tgSleep.Card 284 78 96 $WakeOpts $WakeOpts '07:00'
 $lblSleepMsg = New-Lbl $tgSleep.Card "" 396 83 280 20 $F_Cap $C_GOOD
 
-# 這台電腦是不是「新式待命」（Modern Standby）：新式的睡著時網路還連著、排程照跑，打卡不用叫醒；
+# 這台電腦是不是「新式待命」（Modern Standby）：新式的睡著時排程通常照跑，打卡多半不用叫醒（用電池時有些會斷網，不保證）；
 # 舊式的是真的睡死，要靠喚醒計時器叫醒，常常叫不醒或醒了又睡回去，打不了卡。
 # 讀 GetPwrCapabilities 回傳結構第 20 個位元組（AoAc 欄位）；powercfg /a 的文字會照系統語言翻譯，不好判斷
 Add-Type -Namespace Win32 -Name PowrProf -MemberDefinition '[DllImport("powrprof.dll")] public static extern bool GetPwrCapabilities(byte[] caps);'
@@ -940,7 +940,7 @@ function Update-PowerPage {
     try {
         $sleep = [bool](Get-TaskRow 'NightSleep')
         $sAt = Get-SleepSetting 'SleepAt' '01:00'; $wAt = Get-SleepSetting 'WakeAt' '07:00'
-        $kind = if ($script:ModernStandby) { "這台是新式待命，睡著也照常打卡。" } else { "⚠ 這台是舊式睡眠，睡著後常叫不醒、打不了卡，不建議開。" }
+        $kind = if ($script:ModernStandby) { "這台是新式待命，睡著通常不影響打卡。" } else { "⚠ 這台是舊式睡眠，睡著後常叫不醒、打不了卡，不建議開。" }
         Set-Toggle $tgSleep $sleep $(if ($sleep) { "$sAt 閒置 10 分鐘就睡，$wAt 叫醒；值班夜和傳過 /sleepoff 的晚上不睡。$kind" } else { "電腦不會自己睡。$kind" })
         $so = @($SleepOpts + $sAt | Select-Object -Unique); $wo = @($WakeOpts + $wAt | Select-Object -Unique)
         Set-ComboItems $cbSleepAt $so $so $sAt
@@ -1133,8 +1133,20 @@ $btnPunch.Add_Click({
 
 # 用自動打卡同一個 Chrome 設定檔開打卡網頁：登入過期（要重新掃 QR Code）時在這裡登入，之後自動打卡就認得
 $btnPunchWeb.Add_Click({
-    Start-Process powershell.exe -WindowStyle Hidden `
+    # 打卡進行中別開：同一個設定檔的視窗會併進正在被自動操作的 Chrome，打卡結束時也會被一起關掉
+    if (Test-ProcRunning 'auto-checkin-v2\.ps1(?!.*-Open)') {   # 排除自己按出來的 -Open
+        [System.Windows.Forms.MessageBox]::Show("正在打卡，等打卡結束（約 1–2 分鐘）再開。", "打開打卡網頁") | Out-Null
+        return
+    }
+    $p = Start-Process powershell.exe -WindowStyle Hidden -PassThru `
         -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$script:CheckinScript`" -Open"
+    # 不用 Start-Process -Wait：它會連 Chrome（子程序）一起等。-Open 開完 Chrome 就結束，幾秒內就有結果
+    if ($p.WaitForExit(15000) -and $p.ExitCode -eq 1) {
+        [System.Windows.Forms.MessageBox]::Show("找不到 Chrome，請先安裝 Google Chrome。", "打開打卡網頁") | Out-Null
+        return
+    }
+    # 自動打卡開始時會強制關掉這個設定檔的 Chrome，沒正常關掉的話剛登入的狀態可能沒存到
+    [System.Windows.Forms.MessageBox]::Show("在打開的視窗用手機掃 QR Code 登入。`n`n登入完請把那個視窗關掉，登入狀態才會存好。", "打開打卡網頁") | Out-Null
 })
 
 $btnCheck.Add_Click({
@@ -1247,6 +1259,10 @@ $tgSleep.Sw.Add_Click({
         if ($r -ne [System.Windows.Forms.DialogResult]::Yes) { $this.Enabled = $true; return }
     }
     [void](Invoke-ScriptUI (Join-Path $script:Dir 'sleep.ps1') @($arg) 30)
+    # 自己打開的就寫旗標，update.ps1「幫大家關一次夜間睡眠」才不會把它關掉
+    if ($arg -eq '-Install' -and (Get-TaskRow 'NightSleep')) {
+        try { Set-Content (Join-Path $script:Dir 'data\sleep-reset.done') (Get-Date -Format 'yyyy-MM-dd') } catch {}
+    }
     $this.Enabled = $true
     Update-PowerPage
 })

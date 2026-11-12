@@ -1,9 +1,10 @@
 ﻿#Requires -Version 5.1
 # 在背景接收 Telegram 指令：
-#   /punch 立即打卡            /in /off /am_off /pm_off 預約上班卡／下班卡
-#   /status 查預約和連線狀態   /cancel 取消預約
-#   /sleepoff 今晚不睡         /sleepon 今晚照常睡（有開夜間睡眠才有用）
-#   /update 更新到最新版       /rollback 退回上一版
+#   打卡：/punch 立即打卡      /test 測試打卡（停在按下去前一步）
+#   預約：/in /off /am_off /pm_off 預約上班卡／下班卡   /cancel 取消預約
+#   查詢：/status 查預約和連線狀態
+#   睡眠：/sleepoff 今晚不睡   /sleepon 今晚照常睡（有開夜間睡眠才出現在選單）
+#   更新：/update 更新到最新版 /rollback 退回上一版（有上一版可退才出現在選單）
 # 只聽 bot-config.ps1 裡 $AuthChatId 那個人的話，其他人傳來的一律不理。
 #
 # 用法：
@@ -75,6 +76,7 @@ function Get-SleepLine {
 # 別名和中文指令都對到同一個動作（Telegram 選單只能放英文小寫，中文要自己打）
 $Aliases = @{
     '/punch' = 'punch'; '/打卡' = 'punch'; '/checkin' = 'punch'; '/checkout' = 'punch'
+    '/test' = 'test'; '/測試' = 'test'
     '/in' = 'in'; '/上班卡' = 'in'
     '/off' = 'off'; '/下班卡' = 'off'
     '/am_off' = 'am_off'; '/pm_off' = 'pm_off'
@@ -85,29 +87,59 @@ $Aliases = @{
     '/update' = 'update'; '/更新' = 'update'
     '/rollback' = 'rollback'; '/退版' = 'rollback'
 }
-$Help = "可用指令：`n/punch 立即打卡`n/in 預約上班卡（08:00 前）`n/off 預約下班卡（17:30 後）`n/am_off 值班隔天早上下班卡`n/pm_off 值班隔天中午下班卡`n/status 查看預約和連線`n/cancel 取消預約`n/sleepoff 今晚不睡　/sleepon 今晚照常睡`n/update 更新到最新版　/rollback 退回上一版"
-
-# 讓 Telegram 輸入框的「/」選單列出這幾個指令
-try {
-    $cmds = ConvertTo-Json -Compress @(
-        @{ command = 'punch';    description = '立即打卡' },
-        @{ command = 'in';       description = '預約上班卡' },
-        @{ command = 'off';      description = '預約下班卡（17:30 後）' },
-        @{ command = 'am_off';   description = '預約值班隔天早上的下班卡' },
-        @{ command = 'pm_off';   description = '預約值班隔天中午的下班卡' },
-        @{ command = 'status';   description = '查看預約和連線狀態' },
-        @{ command = 'cancel';   description = '取消已預約的打卡' },
-        @{ command = 'sleepoff'; description = '今晚電腦不睡' },
-        @{ command = 'sleepon';  description = '今晚電腦照常睡' },
-        @{ command = 'update';   description = '更新到最新版' },
-        @{ command = 'rollback'; description = '退回上一版（新版打卡有問題時）' })
-    Invoke-RestMethod "$Api/setMyCommands" -Method POST -TimeoutSec 15 -ContentType 'application/json; charset=utf-8' `
-        -Body ([Text.Encoding]::UTF8.GetBytes("{`"commands`":$cmds}")) | Out-Null
-} catch {}
+# 選單和說明依狀態變：沒開夜間睡眠就不列睡眠指令，沒有上一版就不列 /rollback。
+# 藏起來的指令照樣能打，只是不佔選單。Telegram 選單不能分組，用排序＋每組的開頭符號區分
+$BackupVer = "$PSScriptRoot\..\data\backup-version.txt"   # update.ps1 更新時留的上一版
+function Get-MenuState {
+    @{ Sleep = [bool](Get-ScheduledTask -TaskName NightSleep -ErrorAction SilentlyContinue)
+       Rollback = (Test-Path $BackupVer) -and (Test-Path "$PSScriptRoot\..\data\backup") }
+}
+function Get-MenuCommands($State) {
+    $c = @(
+        @{ command = 'punch';  description = '⏰ 立即打卡' },
+        @{ command = 'test';   description = '⏰ 測試打卡（停在按下去前一步，不會真的打）' },
+        @{ command = 'in';     description = '📅 預約上班卡' },
+        @{ command = 'off';    description = '📅 預約下班卡（17:30 後）' },
+        @{ command = 'am_off'; description = '📅 預約值班隔天早上的下班卡' },
+        @{ command = 'pm_off'; description = '📅 預約值班隔天中午的下班卡' },
+        @{ command = 'cancel'; description = '📅 取消已預約的打卡' },
+        @{ command = 'status'; description = '🔍 查看預約和連線狀態' })
+    if ($State.Sleep) {
+        $c += @{ command = 'sleepoff'; description = '😴 今晚電腦不睡' }
+        $c += @{ command = 'sleepon';  description = '😴 今晚電腦照常睡' }
+    }
+    $c += @{ command = 'update'; description = '🔄 更新到最新版' }
+    if ($State.Rollback) { $c += @{ command = 'rollback'; description = '🔄 退回上一版（新版打卡有問題時）' } }
+    $c
+}
+function Get-HelpText {
+    $st = Get-MenuState
+    $t = "可用指令：`n`n⏰ 打卡`n/punch 立即打卡`n/test 測試打卡（停在按下去前一步，不會真的打）" +
+         "`n`n📅 預約`n/in 上班卡（08:00 前）`n/off 下班卡（17:30 後）`n/am_off 值班隔天早上下班卡`n/pm_off 值班隔天中午下班卡`n/cancel 取消預約" +
+         "`n`n🔍 查詢`n/status 預約和連線狀態"
+    if ($st.Sleep) { $t += "`n`n😴 睡眠`n/sleepoff 今晚不睡`n/sleepon 今晚照常睡" }
+    $t += "`n`n🔄 更新`n/update 更新到最新版"
+    if ($st.Rollback) { $t += "`n/rollback 退回上一版" }
+    $t
+}
+# 狀態有變才重設選單（每輪收訊息約 50 秒檢查一次，平常不多打 API）
+$script:MenuKey = ''
+function Update-Menu {
+    $st  = Get-MenuState
+    $key = "$($st.Sleep)|$($st.Rollback)"
+    if ($key -eq $script:MenuKey) { return }
+    try {
+        $cmds = ConvertTo-Json -Compress @(Get-MenuCommands $st)
+        Invoke-RestMethod "$Api/setMyCommands" -Method POST -TimeoutSec 15 -ContentType 'application/json; charset=utf-8' `
+            -Body ([Text.Encoding]::UTF8.GetBytes("{`"commands`":$cmds}")) | Out-Null
+        $script:MenuKey = $key   # 送成功才記，失敗下一輪再試
+    } catch {}
+}
 
 Log "啟動"
 $offset = 0
 while ($true) {
+    Update-Menu
     try {
         $updates = (Invoke-RestMethod "$Api/getUpdates?timeout=50&offset=$offset" -TimeoutSec 65).result
         foreach ($u in $updates) {
@@ -135,6 +167,14 @@ while ($true) {
                     # 另開程序跑，打卡期間（失敗重試最多 6 分鐘）仍能收其他指令；結果和截圖由 scheduled-punch.ps1 自己傳
                     Start-Process powershell.exe -WindowStyle Hidden -ArgumentList `
                         "-ExecutionPolicy Bypass -NonInteractive -File `"$PSScriptRoot\scheduled-punch.ps1`" -Label 手動"
+                }
+                'test' {
+                    $busy = Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+                        Where-Object { $_.CommandLine -match 'auto-checkin-v2\.ps1|scheduled-punch\.ps1' }
+                    if ($busy) { Reply "⏳ 已經有一次打卡在進行中，完成後再測。"; break }
+                    Reply "🧪 開始測試：會走完整個打卡流程，停在按「立即打卡」前一步，不會真的打卡。約 1 分鐘後回報。"
+                    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList `
+                        "-ExecutionPolicy Bypass -NonInteractive -File `"$PSScriptRoot\scheduled-punch.ps1`" -Label 測試 -DryRun"
                 }
                 { $_ -in 'in', 'off', 'am_off', 'pm_off' } {
                     try { Reply "$(Add-PunchBooking -Kind $action -Codes (Read-ShiftTable))`n$(Get-Booking)" }
@@ -170,7 +210,7 @@ while ($true) {
                     Start-Process powershell.exe -WindowStyle Hidden -ArgumentList `
                         "-ExecutionPolicy Bypass -NonInteractive -File `"$PSScriptRoot\..\update.ps1`" $flag"
                 }
-                default { Reply $Help }
+                default { Reply (Get-HelpText) }
             }
         }
     } catch {

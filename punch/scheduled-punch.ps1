@@ -17,7 +17,7 @@ if ($DryRun) { $psArgs += '-DryRun' }
 for ($run = 1; $run -le 2; $run++) {
     $out = & powershell.exe @psArgs 2>&1 | ForEach-Object { "$_" }
     $verified = $LASTEXITCODE -eq 0
-    if ($verified -or $run -eq 2 -or ($out -match 'RESULT: FAIL (login-expired|no-wifi)')) { break }
+    if ($DryRun -or $verified -or $run -eq 2 -or ($out -match 'RESULT: FAIL (login-expired|no-wifi)')) { break }   # 測試不重跑
     Start-Sleep -Seconds 300
 }
 $retried = $run -eq 2
@@ -27,6 +27,27 @@ $sysTime = ($out | Select-String 'RESULT: OK (.+)$' | Select-Object -First 1).Ma
 $fresh = (Test-Path $Png) -and (((Get-Date) - (Get-Item $Png).LastWriteTime).TotalMinutes -lt 5)
 . "$PSScriptRoot\..\shift-lib.ps1"     # Send-Telegram
 $card = $Label -replace '^預約', ''     # 「預約上班卡」→「上班卡」
+
+# /test：auto-checkin 的 -DryRun 不管成敗都回 0，要看有沒有印出 RESULT: DRYRUN（走到「立即打卡」前一步才會印）。
+# 結果另外寫，不走下面打卡的通知和 message-hook，免得被當成真的打了一張卡
+if ($DryRun) {
+    $text = if ($out -match 'RESULT: DRYRUN') {
+        "🧪 測試通過：連得上 guest_tung、打卡網頁登入有效，也找得到「立即打卡」按鈕。真的打卡應該沒問題（這次沒有按下去）。"
+    } elseif ($out -match 'RESULT: FAIL login-expired') {
+        "🧪 測試失敗：打卡網頁登入已過期。到控制面板按「打開打卡網頁（登入用）」重新掃 QR Code。"
+    } elseif ($out -match 'RESULT: FAIL no-wifi') {
+        "🧪 測試失敗：電腦連不上 guest_tung（不在醫院或訊號太弱），只有 guest_tung 能打卡。"
+    } else {
+        $why = ($out | Select-String 'RESULT: FAIL (.+)$' | Select-Object -First 1).Matches.Groups[1].Value
+        "🧪 測試失敗$(if ($why) { "（$why）" })：沒走到「立即打卡」那一步，真的打卡可能也會失敗。$(if ($fresh) { '截圖附在下方。' })"
+    }
+    try {
+        $thread = Send-Telegram $text -Topic schedule
+        $tid = if ($thread) { @('-F', "message_thread_id=$thread") } else { @() }
+        if ($fresh) { curl.exe -s --max-time 30 -F "chat_id=$ChatId" @tid -F "photo=@$Png" "$ApiBase/sendPhoto" | Out-Null }
+    } catch {}
+    exit
+}
 # 驗證過＝打卡網頁上真的出現「打卡成功」和剛剛的時間；按鈕都點了但沒看到這句，一樣當沒打成
 $twice = if ($retried) { '間隔 5 分鐘試了兩次，' } else { '' }
 # Result 給 message-hook.ps1 分辨是哪一種結果（見 shift-lib.ps1 的 Use-MessageHook）
