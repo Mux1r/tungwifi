@@ -55,7 +55,7 @@ function Test-Online {
 
 function Connect-WiFiSSID {
     $out = netsh wlan connect name="$SSID"
-    if ($out -notmatch "completed successfully") {
+    if ($LASTEXITCODE -ne 0) {   # 不比對文字：netsh 的訊息會照系統語言翻譯
         Write-Log "netsh: $($out -join ' ')" "Red"
     }
     for ($i = 1; $i -le 15; $i++) {
@@ -71,11 +71,14 @@ function Connect-WiFiSSID {
 
 function Get-WifiState {
     # 回傳 "on"（連著 $SSID）、"idle"（真的沒連任何網路）或 "busy"（連著別的網路，或正在切換中）
+    # netsh 的欄位名稱會跟著系統語言變（中文是「狀態 : 連線」，不是「State : connected」），
+    # 所以狀態改看 Get-NetAdapter（Status 是固定英文 Up/Disconnected），netsh 只拿「SSID」這個不會被翻譯的欄位。
     $info = (netsh wlan show interfaces) -join "`n"
-    $state = [regex]::Match($info, "(?m)^\s*State\s*:\s*(.+?)\s*$").Groups[1].Value
     $curSsid = [regex]::Match($info, "(?m)^\s*SSID\s*:\s*(.+?)\s*$").Groups[1].Value   # 不能叫 $ssid，PowerShell 變數不分大小寫會蓋掉 $SSID
-    if ($state -eq "connected" -and $curSsid -eq $SSID) { return "on" }
-    if ($state -eq "disconnected") { return "idle" }
+    $nic = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object NdisPhysicalMedium -eq 9 | Select-Object -First 1   # 9 = 802.11 無線網卡
+    $up = $nic -and $nic.Status -eq "Up"
+    if ($up -and $curSsid -eq $SSID) { return "on" }
+    if (-not $up -and -not $curSsid) { return "idle" }
     return "busy"
 }
 

@@ -418,6 +418,17 @@ function Stop-MonitorNow {
         ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 }
 
+# 面板平常用一般權限開（開管理員的話，它開出來的打卡 Chrome 也是管理員，早上自動打卡關不掉）。
+# 少數要管理員的動作才用這個：跳 UAC 跑一小段指令並等它結束；使用者按「否」回傳 $false
+function Invoke-Elevated([string]$Command) {
+    $enc = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Command))   # 用 EncodedCommand 免得引號被吃掉
+    try {
+        Start-Process powershell.exe -Verb RunAs -WindowStyle Hidden -Wait -ErrorAction Stop `
+            -ArgumentList "-NoProfile -ExecutionPolicy Bypass -NonInteractive -EncodedCommand $enc"
+        return $true
+    } catch { return $false }
+}
+
 # 跑一支腳本並等它結束，等的時候視窗照樣能動（不然會顯示「沒有回應」）
 function Invoke-ScriptUI([string]$File, [string[]]$Arguments, [int]$MaxSec = 300) {
     $argLine = "-NoProfile -ExecutionPolicy Bypass -NonInteractive -File `"$File`" $($Arguments -join ' ')"
@@ -1147,11 +1158,20 @@ function Update-PunchList([bool]$Force = $false) {
 
 $btnStart.Add_Click({ Start-MonitorNow; Start-Sleep -Milliseconds 600; Update-Status })
 $btnStop.Add_Click({
-    Stop-MonitorNow; Start-Sleep -Milliseconds 600; Update-Status
+    Stop-MonitorNow; Start-Sleep -Milliseconds 600
+    # 開機自啟的監控是用最高權限跑的（要能重啟網卡），一般權限停不掉，改用管理員再停一次
     if (Test-MonitorRunning) {
-        [System.Windows.Forms.MessageBox]::Show(
-            "監控程序以較高權限執行，無法從這裡停止。`n請以系統管理員身分開啟本面板再試。", "無法停止") | Out-Null
+        $ok = Invoke-Elevated ("Stop-ScheduledTask -TaskName '$MonitorTask' -ErrorAction SilentlyContinue; " +
+            "Get-CimInstance Win32_Process -Filter `"Name='powershell.exe'`" | Where-Object { `$_.CommandLine -match 'wifi-monitor\.ps1' } | " +
+            "ForEach-Object { Stop-Process -Id `$_.ProcessId -Force }")
+        Start-Sleep -Milliseconds 600
+        if (Test-MonitorRunning) {
+            [System.Windows.Forms.MessageBox]::Show(
+                $(if ($ok) { "還是停不下來，請重開電腦或稍後再試。" } else { "監控要用系統管理員權限才停得掉，剛剛的確認視窗按「是」就可以。" }),
+                "無法停止") | Out-Null
+        }
     }
+    Update-Status
 })
 
 $btnLogin.Add_Click({
@@ -1301,6 +1321,16 @@ $tgSleep.Sw.Add_Click({
     # 自己打開的就寫旗標，update.ps1「幫大家關一次夜間睡眠」才不會把它關掉
     if ($arg -eq '-Install' -and (Get-TaskRow 'NightSleep')) {
         try { Set-Content (Join-Path $script:Dir 'data\sleep-reset.done') (Get-Date -Format 'yyyy-MM-dd') } catch {}
+        # sleep.ps1 用一般權限可能改不到「允許喚醒計時器」；還是停用的話才跳 UAC 補改（最後兩個 0x 是插電、用電池）
+        $hex = @(powercfg /qh SCHEME_CURRENT SUB_SLEEP RTCWAKE | Select-String '0x[0-9a-fA-F]{8}' | ForEach-Object { $_.Matches[0].Value })
+        if ($hex.Count -ge 2 -and $hex[-2..-1] -contains '0x00000000') {
+            $ok = Invoke-Elevated ('powercfg /setacvalueindex SCHEME_CURRENT SUB_SLEEP RTCWAKE 1; ' +
+                'powercfg /setdcvalueindex SCHEME_CURRENT SUB_SLEEP RTCWAKE 1; powercfg /setactive SCHEME_CURRENT')
+            if (-not $ok) {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "夜間睡眠已開啟，但「允許喚醒計時器」沒打開，早上可能叫不醒電腦。`n要打開的話，把開關關掉再開一次，確認視窗按「是」。", "夜間睡眠") | Out-Null
+            }
+        }
     }
     $this.Enabled = $true
     Update-PowerPage

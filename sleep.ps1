@@ -41,7 +41,7 @@ if ($Install) {
         -Settings (New-ScheduledTaskSettingsSet -WakeToRun -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries) `
         -Action (New-ScheduledTaskAction -Execute 'cmd.exe' -Argument '/c exit') | Out-Null
     # 「允許喚醒計時器」關著的話 WakeToRun 叫不醒電腦（插電、用電池都打開）。
-    # 這要管理員才改得動：從 install.cmd 開會成功，從控制面板開可能沒權限，那就維持原本的電源設定
+    # 這要管理員才改得動：從 install.cmd 開會成功；從控制面板開沒改到的話，控制面板會另外跳 UAC 補改
     powercfg /setacvalueindex SCHEME_CURRENT SUB_SLEEP RTCWAKE 1 2>$null | Out-Null
     powercfg /setdcvalueindex SCHEME_CURRENT SUB_SLEEP RTCWAKE 1 2>$null | Out-Null
     powercfg /setactive SCHEME_CURRENT 2>$null | Out-Null

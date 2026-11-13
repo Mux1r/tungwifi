@@ -48,8 +48,9 @@ Write-Host "`n[1/2] 取得登入 URL..." -ForegroundColor Cyan
 
 $wlanInfo  = (netsh wlan show interfaces) -join "`n"
 $apMac     = if ($wlanInfo -match "(?m)BSSID\s*:\s*([\da-fA-F:]{17})")            { $matches[1] } else { "84:b2:61:9d:33:90" }
-# 備援值只有在 netsh 讀不到時才會用到，換成自己網卡的 MAC（netsh wlan show interfaces 可查）
-$clientMac = if ($wlanInfo -match "(?m)Physical address\s*:\s*([\da-fA-F:]{17})") { $matches[1] } else { "00:00:00:00:00:00" }
+# 本機 MAC 不從 netsh 拿：「Physical address」在中文版是「實體位址」。Get-NetAdapter 給的是 50-BB-B5-... 要換成冒號
+$nicMac    = (Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object NdisPhysicalMedium -eq 9 | Select-Object -First 1).MacAddress
+$clientMac = if ($nicMac) { $nicMac.Replace('-', ':').ToLower() } else { "00:00:00:00:00:00" }
 
 $loginURL = "https://192.168.254.254/fs/customwebauth/login.html" +
             "?switch_url=https://192.168.254.254/login.html" +

@@ -102,7 +102,7 @@ Get-ChildItem ([Environment]::GetFolderPath('Desktop')), ([Environment]::GetFold
 | 每天檢查更新 | `update.ps1 -Install` | 排程 `AutoUpdate`：每天 09:00（電腦沒醒就醒來補跑）比對 GitHub `main` 最新 commit。預設只傳 Telegram 通知（同一版只通知一次），`settings.ps1` 設 `$AutoUpdate = 1` 才直接更新。更新時下載 zip 覆蓋程式檔，新版有任何 `.ps1` 語法錯誤就整批不更新；打卡進行中會等它結束（最多 10 分鐘）。覆蓋前把目前這版備份到 `data\backup\`，`update.ps1 -Rollback` 退回並把退掉的版本記進 `data\update-skip.txt`，不再自動裝。紀錄在 `data\update.log` |
 | 打卡檢查 | `punch\punch-guard.ps1 -Install` | 排程 `PunchGuard`：每 5 分鐘檢查預約的卡（手動 `/in`、`/off` 或依班表）有沒有打成，沒有就發 Telegram |
 | 每晚預約打卡（選用） | `punch\nightly-book.ps1 -Install` | 排程 `NightlyBook`：每天 21:00 照 `data\shifts.csv` 註冊隔天的 `PunchIn-Booked` / `PunchOut-Booked` |
-| 夜間睡眠（選用，安裝時不開，只能從控制面板開） | `sleep.ps1 -Install`／`-Uninstall` | 排程 `NightSleep`（預設 01:00，等閒置 10 分鐘就睡，不補跑）和 `MorningWake`（預設 07:00，WakeToRun 叫醒），時間存在 `settings.ps1` 的 `$SleepAt`／`$WakeAt`；只在睡覺前 15 分鐘到起床前 2 小時之間真的睡；並用 `powercfg` 打開「允許喚醒計時器」（要管理員，從控制面板開可能改不到） |
+| 夜間睡眠（選用，安裝時不開，只能從控制面板開） | `sleep.ps1 -Install`／`-Uninstall` | 排程 `NightSleep`（預設 01:00，等閒置 10 分鐘就睡，不補跑）和 `MorningWake`（預設 07:00，WakeToRun 叫醒），時間存在 `settings.ps1` 的 `$SleepAt`／`$WakeAt`；只在睡覺前 15 分鐘到起床前 2 小時之間真的睡；並用 `powercfg` 打開「允許喚醒計時器」（要管理員；從控制面板開沒改到的話，控制面板會跳 UAC 補改） |
 
 其他試算工具（不動排程也不發訊息）：
 

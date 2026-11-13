@@ -60,9 +60,13 @@ function Test-Online {
     } catch { return $false }
 }
 
-$wlanInfo    = (netsh wlan show interfaces) -join "`n"
-$onSSID      = $wlanInfo -match "(?m)State\s+:\s+connected" -and $wlanInfo -match [regex]::Escape($SSID)
-$skipNetwork = $onSSID -and (Test-Online)
+# 連著 $SSID 沒：狀態看 Get-NetAdapter（固定英文 Up），netsh 只拿不會被翻譯的「SSID」欄（中文版的「State」是「狀態」）
+function Test-OnSSID {
+    $nic = Get-NetAdapter -ErrorAction SilentlyContinue | Where-Object NdisPhysicalMedium -eq 9 | Select-Object -First 1   # 9 = 802.11 無線網卡
+    $cur = [regex]::Match(((netsh wlan show interfaces) -join "`n"), "(?m)^\s*SSID\s*:\s*(.+?)\s*$").Groups[1].Value
+    [bool]($nic -and $nic.Status -eq 'Up' -and $cur -eq $SSID)
+}
+$skipNetwork = (Test-OnSSID) -and (Test-Online)
 
 if ($skipNetwork) {
     Write-Host "`n[網路] 已連線 $SSID 且網路正常，直接執行打卡" -ForegroundColor Green
@@ -114,10 +118,7 @@ netsh wlan connect name="$SSID" | Out-Null
 $connected = $false
 for ($i = 1; $i -le 20; $i++) {
     Start-Sleep -Seconds 2
-    $info = (netsh wlan show interfaces) -join "`n"
-    if ($info -match "(?m)State\s+:\s+connected" -and $info -match [regex]::Escape($SSID)) {
-        $connected = $true; break
-    }
+    if (Test-OnSSID) { $connected = $true; break }
     Write-Host "  等待中... ($($i * 2) 秒)"
 }
 
