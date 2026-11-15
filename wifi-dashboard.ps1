@@ -1436,12 +1436,23 @@ $btnChkUpd.Add_Click({
     $btnChkUpd.Enabled = $true
 })
 
+# 更新／退版後版本真的換了，就開一份新的控制面板再關掉自己，新介面馬上生效
+function Restart-IfChanged([string]$OldSha) {
+    if ((Get-VersionLine).Sha -eq $OldSha) { return $false }
+    Start-Process powershell.exe -WindowStyle Hidden `
+        -ArgumentList "-ExecutionPolicy Bypass -File `"$(Join-Path $script:Dir 'wifi-dashboard.ps1')`""
+    $form.Close()
+    return $true
+}
+
 $btnApply.Add_Click({
     $btnApply.Enabled = $false; $btnChkUpd.Enabled = $false; $btnRollbk.Enabled = $false
     $lblUpdMsg.Text = "更新中..."; $lblUpdMsg.ForeColor = $C_MUTE
+    $old = (Get-VersionLine).Sha
     $done = Invoke-ScriptUI $script:UpdateScript @('-Apply') 900   # 打卡進行中會等最多 10 分鐘
+    if (Restart-IfChanged $old) { return }   # 關掉之後不要再動已經關掉的畫面
     Update-AboutPage
-    $lblUpdMsg.Text = if ($done) { "完成，重開控制面板才會看到新介面" } else { "還在跑，稍後看更新紀錄" }
+    $lblUpdMsg.Text = if ($done) { "跑完了但版本沒變，看下面的更新紀錄" } else { "還在跑，稍後看更新紀錄" }
     $lblUpdMsg.ForeColor = if ($done) { $C_GOOD } else { $C_WARN }
     $btnChkUpd.Enabled = $true
 })
@@ -1453,9 +1464,11 @@ $btnRollbk.Add_Click({
     if ($r -ne [System.Windows.Forms.DialogResult]::Yes) { return }
     $btnRollbk.Enabled = $false; $btnApply.Enabled = $false
     $lblUpdMsg.Text = "退版中..."; $lblUpdMsg.ForeColor = $C_MUTE
+    $old = (Get-VersionLine).Sha
     $done = Invoke-ScriptUI $script:UpdateScript @('-Rollback') 900
+    if (Restart-IfChanged $old) { return }   # 關掉之後不要再動已經關掉的畫面
     Update-AboutPage
-    $lblUpdMsg.Text = if ($done) { "已退回，重開控制面板才會看到舊介面" } else { "還在跑，稍後看更新紀錄" }
+    $lblUpdMsg.Text = if ($done) { "跑完了但版本沒變，看下面的更新紀錄" } else { "還在跑，稍後看更新紀錄" }
     $lblUpdMsg.ForeColor = if ($done) { $C_GOOD } else { $C_WARN }
 })
 
