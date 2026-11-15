@@ -57,6 +57,16 @@
 
 裝好之後不用再下載。有新版時 Telegram 會通知，回 `/update` 就更新，也可以在控制面板「關於與更新」按「立即更新」。Telegram 金鑰、WiFi 帳密、班表和控制面板的設定都不會被更新蓋掉。
 
+### 每個整點閃一下藍色視窗
+
+2026-11-15 以前安裝的電腦，每個整點會閃一下藍色的 PowerShell 視窗。那是 WiFi 監控每小時檢查自己有沒有在跑，不影響打卡和 WiFi。更新程式改不到這張排程（要管理員權限），想讓它消失的話，在開始選單找「PowerShell」，按右鍵選「以系統管理員身分執行」，貼上這一行按 Enter：
+
+```powershell
+$a=(Get-ScheduledTask WiFi-AutoLogin-Monitor).Actions[0]; if ($a.Execute -ne 'conhost.exe') { Set-ScheduledTask -TaskName WiFi-AutoLogin-Monitor -Action (New-ScheduledTaskAction -Execute conhost.exe -Argument "--headless powershell.exe $($a.Arguments)") | Out-Null }; '改好了'
+```
+
+看到「改好了」就完成。這行只改這張排程的啟動方式，其他設定都不動，貼兩次也沒關係。之後新安裝的電腦已經是不閃的版本，不用做。
+
 ## 其他說明
 
 - [INSTALL.md](INSTALL.md)：自己手動安裝、設定 Telegram bot、改選項和填班表、指令的細節。
