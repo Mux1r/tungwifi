@@ -28,8 +28,10 @@ try {
                         -ExecutionTimeLimit ([TimeSpan]::Zero) `
                         -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 2) `
                         -MultipleInstances IgnoreNew) `
-        -Action    (New-ScheduledTaskAction -Execute "powershell.exe" `
-                        -Argument "-WindowStyle Hidden -ExecutionPolicy Bypass -NonInteractive -File `"$MonitorScript`"") | Out-Null
+        # conhost --headless：完全不建視窗。原本 powershell.exe -WindowStyle Hidden 是先開視窗再藏，
+        # 每小時補開那份一啟動就因為已有一份在跑而結束，整點都會閃一下藍色視窗
+        -Action    (New-ScheduledTaskAction -Execute "conhost.exe" `
+                        -Argument "--headless powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -NonInteractive -File `"$MonitorScript`"") | Out-Null
     Write-Host "  完成，每次登入會自動在背景啟動。" -ForegroundColor Green
 } catch {
     Write-Host "  [錯誤] $($_.Exception.Message)" -ForegroundColor Red
