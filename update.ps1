@@ -9,7 +9,8 @@
 #   update.ps1 -Apply     立即更新到最新版（Telegram /update、控制面板按鈕）
 #   update.ps1 -Rollback  退回更新前的版本，並跳過這一版（Telegram /rollback）
 #   update.ps1 -Install   註冊自己的排程（AutoUpdate，每天 09:00，電腦沒醒就醒來補跑）
-param([switch]$Install, [switch]$Apply, [switch]$Rollback)
+#   -Quiet                不傳 Telegram（控制面板按鈕用：結果畫面上就看得到，不用再傳訊息）
+param([switch]$Install, [switch]$Apply, [switch]$Rollback, [switch]$Quiet)
 
 $Repo     = 'Mux1r/tungwifi'
 $Branch   = 'main'
@@ -39,6 +40,7 @@ $BackupDir   = "$Dir\data\backup"               # 只留更新前那一版（刻
 $BackupVer   = "$Dir\data\backup-version.txt"   # 備份那一版的 version.txt（不放進 backup\，不然退版時會被當程式檔搬出來）
 function Log([string]$Msg) { try { Add-Content $LogFile "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Msg" -Encoding UTF8 } catch {} }
 . "$Dir\shift-lib.ps1"   # Send-Telegram
+if ($Quiet) { function Send-Telegram { } }   # 蓋掉成什麼都不做；結果照樣寫進 update.log
 
 # 這幾個是個人檔，就算哪天不小心進了 repo 也不能蓋掉本機那份
 $Personal = 'bot-config.ps1', 'wifi-accounts.ps1', 'settings.ps1', 'message-hook.ps1'

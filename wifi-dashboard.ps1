@@ -1432,7 +1432,7 @@ $btnApply.Add_Click({
     $btnApply.Enabled = $false; $btnChkUpd.Enabled = $false; $btnRollbk.Enabled = $false
     $lblUpdMsg.Text = "更新中..."; $lblUpdMsg.ForeColor = $C_MUTE
     $old = (Get-VersionLine).Sha
-    $done = Invoke-ScriptUI $script:UpdateScript @('-Apply') 900   # 打卡進行中會等最多 10 分鐘
+    $done = Invoke-ScriptUI $script:UpdateScript @('-Apply', '-Quiet') 900   # 打卡進行中會等最多 10 分鐘
     if (Restart-IfChanged $old) { return }   # 關掉之後不要再動已經關掉的畫面
     Update-AboutPage
     $lblUpdMsg.Text = if ($done) { "跑完了但版本沒變，看下面的更新紀錄" } else { "還在跑，稍後看更新紀錄" }
@@ -1448,7 +1448,7 @@ $btnRollbk.Add_Click({
     $btnRollbk.Enabled = $false; $btnApply.Enabled = $false
     $lblUpdMsg.Text = "退版中..."; $lblUpdMsg.ForeColor = $C_MUTE
     $old = (Get-VersionLine).Sha
-    $done = Invoke-ScriptUI $script:UpdateScript @('-Rollback') 900
+    $done = Invoke-ScriptUI $script:UpdateScript @('-Rollback', '-Quiet') 900
     if (Restart-IfChanged $old) { return }   # 關掉之後不要再動已經關掉的畫面
     Update-AboutPage
     $lblUpdMsg.Text = if ($done) { "跑完了但版本沒變，看下面的更新紀錄" } else { "還在跑，稍後看更新紀錄" }
