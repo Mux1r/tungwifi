@@ -1405,17 +1405,25 @@ $btnChkUpd.Add_Click({
     $btnChkUpd.Enabled = $true
 })
 
-# 更新／退版後版本真的換了，就用資料夾裡的捷徑開一份新的控制面板再關掉自己，新介面馬上生效。
-# 刻意走捷徑、不自己用隱藏視窗叫 PowerShell：後者像惡意程式，McAfee 會擋。沒有捷徑就請使用者自己重開
+# 更新／退版後版本真的換了，就開一份新的控制面板再關掉自己，新介面馬上生效。
+# 有捷徑就走捷徑（跟使用者自己點一樣）；沒有就用跟捷徑同一行指令。
+# 不能用 Start-Process -WindowStyle Hidden：Windows 會把「隱藏」套到新程式的第一個視窗，控制面板就開了但看不見
 function Restart-IfChanged([string]$OldSha) {
     if ((Get-VersionLine).Sha -eq $OldSha) { return $false }
-    $lnk = Join-Path $script:Dir 'WiFi 控制面板.lnk'
-    if (-not (Test-Path -LiteralPath $lnk)) {
+    $lnk = @((Join-Path $script:Dir 'WiFi 控制面板.lnk'),
+             (Join-Path ([Environment]::GetFolderPath('Desktop')) 'WiFi 控制面板.lnk')) |
+           Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    try {
+        if ($lnk) { Start-Process -FilePath $lnk -ErrorAction Stop }
+        else {
+            Start-Process "$env:SystemRoot\System32\conhost.exe" -ErrorAction Stop `
+                -ArgumentList "--headless powershell.exe -ExecutionPolicy Bypass -File `"$(Join-Path $script:Dir 'wifi-dashboard.ps1')`""
+        }
+    } catch {   # 開不起來（例如被防毒擋）就不關自己，免得什麼都不見
         $lblUpdMsg.Text = "完成，重開控制面板才會看到新介面"; $lblUpdMsg.ForeColor = $C_GOOD
         $btnChkUpd.Enabled = $true
         return $true
     }
-    Start-Process -FilePath $lnk
     $form.Close()
     return $true
 }
