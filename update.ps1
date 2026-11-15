@@ -4,8 +4,8 @@
 # 新版裡只要有一支腳本語法錯誤就整批不更新，免得一次壞掉大家的打卡。
 #
 # 用法：
-#   update.ps1            檢查一次（給排程跑）。預設只用 Telegram 通知有新版，回 /update 才裝；
-#                         settings.ps1 裡 $AutoUpdate = 1 就直接裝
+#   update.ps1            檢查一次（給排程跑）。預設有新版就直接裝；
+#                         settings.ps1 裡 $AutoUpdate = 0 就只用 Telegram 通知，回 /update 才裝
 #   update.ps1 -Apply     立即更新到最新版（Telegram /update、控制面板按鈕）
 #   update.ps1 -Rollback  退回更新前的版本，並跳過這一版（Telegram /rollback）
 #   update.ps1 -Install   註冊自己的排程（AutoUpdate，每天 09:00，電腦沒醒就醒來補跑）
@@ -42,7 +42,7 @@ function Log([string]$Msg) { try { Add-Content $LogFile "[$(Get-Date -Format 'yy
 
 # 這幾個是個人檔，就算哪天不小心進了 repo 也不能蓋掉本機那份
 $Personal = 'bot-config.ps1', 'wifi-accounts.ps1', 'settings.ps1', 'message-hook.ps1'
-$AutoUpdate = 0
+$AutoUpdate = 1
 if (Test-Path "$Dir\settings.ps1") { try { . "$Dir\settings.ps1" } catch {} }   # $AutoUpdate（控制面板寫入）
 
 function Get-LocalSha { if (Test-Path $VersionFile) { "$(Get-Content $VersionFile -TotalCount 1)".Trim() } else { '' } }
@@ -157,8 +157,8 @@ try {
     }
     $changeText = ($changes | Select-Object -Last 10) -join "`n"
 
-    # 預設只通知；第一次跑（剛安裝）直接裝，只是把版本對齊
-    if ($local -and -not $Apply -and "$AutoUpdate" -ne '1') {
+    # 關掉自動更新（$AutoUpdate = 0）才只通知；第一次跑（剛安裝）一律直接裝，只是把版本對齊
+    if ($local -and -not $Apply -and "$AutoUpdate" -eq '0') {
         if (-not (Test-Path $NotifiedFile) -or "$(Get-Content $NotifiedFile -TotalCount 1)".Trim() -ne $sha) {
             Send-Telegram "🆕 有新版可以更新：`n$changeText`n`n要更新就回 /update" -Event update -Data @{ Kind = 'available'; Changes = $changeText } | Out-Null
             Set-Content $NotifiedFile $sha

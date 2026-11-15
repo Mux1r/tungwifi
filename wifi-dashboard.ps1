@@ -943,8 +943,8 @@ function Update-FeatureCards {
     }
     $book = [bool](Get-TaskRow 'NightlyBook')
     Set-Toggle $tgBook $book $(if ($book) { "每晚 21:00 照 data\shifts.csv 預約隔天的卡。" } else { "要打卡就傳 /punch，或用 /in、/off 預約。" })
-    $auto = (Read-Setting 'AutoUpdate') -eq '1'
-    Set-Toggle $tgUpd $auto $(if ($auto) { "每天 09:00 有新版就直接更新，更新完 Telegram 通知。" } else { "每天 09:00 有新版只傳 Telegram 通知，回 /update 才更新（預設）。" })
+    $auto = (Read-Setting 'AutoUpdate') -ne '0'   # 沒設定過就算開（預設）
+    Set-Toggle $tgUpd $auto $(if ($auto) { "每天 09:00 有新版就直接更新，更新完 Telegram 通知（預設）。" } else { "每天 09:00 有新版只傳 Telegram 通知，回 /update 才更新。" })
 }
 
 # ── 睡眠與電源頁 ──────────────────────────────────────────────
@@ -1392,7 +1392,7 @@ $tgSleep.Sw.Add_Click({
 })
 
 $tgUpd.Sw.Add_Click({
-    $new = if ((Read-Setting 'AutoUpdate') -eq '1') { '0' } else { '1' }
+    $new = if ((Read-Setting 'AutoUpdate') -ne '0') { '0' } else { '1' }
     try { Write-Setting 'AutoUpdate' $new } catch {
         [System.Windows.Forms.MessageBox]::Show("存不進 settings.ps1：$($_.Exception.Message)", "儲存失敗") | Out-Null
     }
