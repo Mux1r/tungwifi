@@ -39,9 +39,8 @@ Add-Type -ReferencedAssemblies System.Windows.Forms, System.Drawing -TypeDefinit
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Globalization;
 using System.Runtime.InteropServices;
-using System.Text.RegularExpressions;
+using System.Drawing.Imaging;
 using System.Windows.Forms;
 
 namespace Fluent
@@ -63,46 +62,6 @@ namespace Fluent
             p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
             p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
             p.CloseFigure();
-            return p;
-        }
-
-        // GitHub 標誌：Windows 圖示字型裡沒有，照 GitHub 官方 16×16 SVG 畫。
-        // 故意只解析這條路徑用到的 M、C/c、A（只處理正圓）、z，不是通用 SVG 解析器
-        public static GraphicsPath GitHubMark()
-        {
-            const string d = "M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.06-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z";
-            MatchCollection t = Regex.Matches(d, @"[A-Za-z]|-?(?:\d+\.?\d*|\.\d+)");
-            GraphicsPath p = new GraphicsPath();
-            float x = 0, y = 0; char cmd = 'M'; int i = 0;
-            Func<float> n = () => float.Parse(t[i++].Value, CultureInfo.InvariantCulture);
-            while (i < t.Count)
-            {
-                if (char.IsLetter(t[i].Value[0])) cmd = t[i++].Value[0];
-                float ox = char.IsLower(cmd) ? x : 0, oy = char.IsLower(cmd) ? y : 0;
-                switch (char.ToUpper(cmd))
-                {
-                    case 'M': x = ox + n(); y = oy + n(); p.StartFigure(); break;
-                    case 'C':
-                    {
-                        float x1 = ox + n(), y1 = oy + n(), x2 = ox + n(), y2 = oy + n(), x3 = ox + n(), y3 = oy + n();
-                        p.AddBezier(x, y, x1, y1, x2, y2, x3, y3); x = x3; y = y3; break;
-                    }
-                    case 'A':
-                    {
-                        float r = n(); n(); n(); bool large = n() != 0, sweep = n() != 0;
-                        float ex = ox + n(), ey = oy + n(), dx = ex - x, dy = ey - y;
-                        float dist = (float)Math.Sqrt(dx * dx + dy * dy);
-                        float h = (float)Math.Sqrt(Math.Max(0, r * r - dist * dist / 4)) * (large != sweep ? 1 : -1);
-                        float cx = (x + ex) / 2 - h * dy / dist, cy = (y + ey) / 2 + h * dx / dist;
-                        float a0 = (float)(Math.Atan2(y - cy, x - cx) * 180 / Math.PI);
-                        float s = (float)(Math.Atan2(ey - cy, ex - cx) * 180 / Math.PI) - a0;
-                        if (sweep && s < 0) s += 360;
-                        if (!sweep && s > 0) s -= 360;
-                        p.AddArc(cx - r, cy - r, 2 * r, 2 * r, a0, s); x = ex; y = ey; break;
-                    }
-                    case 'Z': p.CloseFigure(); break;
-                }
-            }
             return p;
         }
 
@@ -207,7 +166,7 @@ namespace Fluent
         public bool Accent;
         string glyph = "";
         public string Glyph { get { return glyph; } set { glyph = value ?? ""; Invalidate(); } }
-        public GraphicsPath Mark;   // 圖示字型裡沒有的圖示（16×16 座標），有設就取代 Glyph
+        public Image Mark;   // 圖示字型裡沒有的圖示（單色透明 PNG），有設就取代 Glyph，顏色跟著文字走
         protected override void OnPaint(PaintEventArgs e)
         {
             Graphics g = e.Graphics;
@@ -235,10 +194,15 @@ namespace Fluent
             int x = (Width - ts.Width - gs.Width - gap) / 2;
             if (Mark != null)
             {
-                g.TranslateTransform(x, (Height - m) / 2f);
-                g.ScaleTransform(m / 16f, m / 16f);
-                using (SolidBrush b = new SolidBrush(fg)) g.FillPath(b, Mark);
-                g.ResetTransform();
+                // 把圖的顏色換成文字色、保留透明度，深色淺色模式和停用狀態都只要一張黑色 PNG
+                using (ImageAttributes ia = new ImageAttributes())
+                {
+                    ia.SetColorMatrix(new ColorMatrix(new float[][] {
+                        new float[] { 0, 0, 0, 0, 0 }, new float[] { 0, 0, 0, 0, 0 }, new float[] { 0, 0, 0, 0, 0 },
+                        new float[] { 0, 0, 0, 1, 0 }, new float[] { fg.R / 255f, fg.G / 255f, fg.B / 255f, 0, 1 } }));
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.DrawImage(Mark, new Rectangle(x, (Height - m) / 2, m, m), 0, 0, Mark.Width, Mark.Height, GraphicsUnit.Pixel, ia);
+                }
             }
             else if (glyph.Length > 0) TextRenderer.DrawText(g, glyph, Theme.Icon, new Point(x, (Height - gs.Height) / 2 + 1), fg, f);
             TextRenderer.DrawText(g, Text, Font, new Point(x + gs.Width + gap, (Height - ts.Height) / 2), fg, f);
@@ -1090,7 +1054,12 @@ $btnApply.Enabled = $false
 $cardNew = New-Card $pgAbout 24 238 690 205
 Add-CardHead $cardNew '' "GitHub 上的新版內容"
 $btnGitHub = New-Btn $cardNew "GitHub" 566 12 110 32
-$btnGitHub.Mark = [Fluent.Theme]::GitHubMark()
+$ghPng = Join-Path $script:Dir 'github.png'
+# 讀成記憶體裡的圖，不鎖住檔案，更新時才蓋得過去。
+# 舊版 update.ps1 不會帶 .png 過來，從舊版更新的第一次可能還沒有這張圖，就先只顯示文字
+if (Test-Path $ghPng) {
+    try { $btnGitHub.Mark = [System.Drawing.Image]::FromStream([IO.MemoryStream]::new([IO.File]::ReadAllBytes($ghPng))) } catch {}
+}
 $btnGitHub.Add_Click({ Start-Process "https://github.com/$script:Repo" })
 $rtbNew = New-Rtb $cardNew 18 50 658 143
 $rtbNew.Text = "按「檢查更新」看看有沒有新版。"
@@ -1436,11 +1405,17 @@ $btnChkUpd.Add_Click({
     $btnChkUpd.Enabled = $true
 })
 
-# 更新／退版後版本真的換了，就開一份新的控制面板再關掉自己，新介面馬上生效
+# 更新／退版後版本真的換了，就用資料夾裡的捷徑開一份新的控制面板再關掉自己，新介面馬上生效。
+# 刻意走捷徑、不自己用隱藏視窗叫 PowerShell：後者像惡意程式，McAfee 會擋。沒有捷徑就請使用者自己重開
 function Restart-IfChanged([string]$OldSha) {
     if ((Get-VersionLine).Sha -eq $OldSha) { return $false }
-    Start-Process powershell.exe -WindowStyle Hidden `
-        -ArgumentList "-ExecutionPolicy Bypass -File `"$(Join-Path $script:Dir 'wifi-dashboard.ps1')`""
+    $lnk = Join-Path $script:Dir 'WiFi 控制面板.lnk'
+    if (-not (Test-Path -LiteralPath $lnk)) {
+        $lblUpdMsg.Text = "完成，重開控制面板才會看到新介面"; $lblUpdMsg.ForeColor = $C_GOOD
+        $btnChkUpd.Enabled = $true
+        return $true
+    }
+    Start-Process -FilePath $lnk
     $form.Close()
     return $true
 }

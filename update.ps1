@@ -57,7 +57,7 @@ function Get-ProgramFiles([string]$Root) {
     Get-ChildItem $Root -Recurse -File | Where-Object {
         $rel = $_.FullName.Substring($Root.Length + 1)
         $rel -notlike 'data\*' -and $rel -notlike '.git\*' -and $_.Name -notin $Personal -and
-        $_.Extension -notin '.log', '.lnk', '.png'
+        $_.Extension -notin '.log', '.lnk' -and $_.Name -ne 'checkin-screenshot.png'   # 打卡截圖是每次打卡產生的，不是程式檔
     }
 }
 function Copy-Program([string]$From, [string]$To) {
