@@ -148,21 +148,10 @@ try {
     $skipped = (Test-Path $SkipFile) -and ("$(Get-Content $SkipFile -TotalCount 1)".Trim() -eq $sha)
     if ($skipped -and -not $Apply) { return }   # 退回過的版本，手動 /update 才裝
 
-    # 這次更新包含哪些改動（本機版本之後的每一筆）。第一次跑沒有本機版本就不列
-    $changes = @()
-    if ($local) {
-        try {
-            $cmp = Invoke-RestMethod "https://api.github.com/repos/$Repo/compare/$local...$sha" -TimeoutSec 30
-            $changes = @($cmp.commits | ForEach-Object { '• ' + ($_.commit.message -split "`n")[0] })
-        } catch {}
-        if (-not $changes) { $changes = @('• ' + ($commit.commit.message -split "`n")[0]) }
-    }
-    $changeText = ($changes | Select-Object -Last 10) -join "`n"
-
     # 關掉自動更新（$AutoUpdate = 0）才只通知；第一次跑（剛安裝）一律直接裝，只是把版本對齊
     if ($local -and -not $Apply -and "$AutoUpdate" -eq '0') {
         if (-not (Test-Path $NotifiedFile) -or "$(Get-Content $NotifiedFile -TotalCount 1)".Trim() -ne $sha) {
-            Send-Telegram "🆕 有新版可以更新：`n$changeText`n`n要更新就回 /update" -Event update -Data @{ Kind = 'available'; Changes = $changeText } | Out-Null
+            Send-Telegram "🆕 有新版可以更新，要更新就回 /update" -Event update -Data @{ Kind = 'available' } | Out-Null
             Set-Content $NotifiedFile $sha
             Log "通知新版 $($sha.Substring(0, 7))"
         }
@@ -212,7 +201,7 @@ try {
     }
 
     if ($local) {   # 第一次跑只是記下版本，不用通知
-        Send-Telegram "🔄 已更新到最新版：`n$changeText`n`n打卡有問題的話回 /rollback 退回上一版" -Event update -Data @{ Kind = 'updated'; Changes = $changeText } | Out-Null
+        Send-Telegram "🔄 已更新到最新版。`n打卡有問題的話回 /rollback 退回上一版" -Event update -Data @{ Kind = 'updated' } | Out-Null
     }
 } catch {
     Log "更新失敗：$($_.Exception.Message)"
