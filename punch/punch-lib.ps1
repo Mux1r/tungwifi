@@ -55,7 +55,7 @@ function Get-ShiftPunches {
             return @(@{ Kind = 'in'; Date = $Date }, @{ Kind = 'off'; Date = $Date })
         }
     }
-    throw "班別代碼「$Code」沒見過（$($Date.ToString('MM/dd'))），不敢亂猜要打哪張卡。"
+    throw "無法辨識班別代碼「$Code」（$($Date.ToString('MM/dd'))）"
 }
 
 # 把一張卡換算成實際要執行的時刻（官方時間 + 隨機緩衝）
@@ -97,7 +97,7 @@ function Add-PunchBooking {
     $at   = Find-ShiftPunchTime -Kind $Kind -Codes $Codes -Now $Now
     $note = ''
     if (-not $at) {
-        $note = "`n（班表 14 天內找不到這張卡，先照時間排最近的一個，不對就傳 /cancel）"
+        $note = "`n備註：班表 14 天內無此班別，已依時間預約最近一次"
         $at   = Get-NextPunchTime -Hour $p.Hour -Minute $p.Minute -Offset $p.Offset -Now $Now
         if ($p.Slot -eq $TaskOut) {
             $inTask = Get-ScheduledTask -TaskName $TaskIn -ErrorAction SilentlyContinue
@@ -109,7 +109,7 @@ function Add-PunchBooking {
         }
     }
     if (-not $DryRun) { Register-PunchTask -Name $p.Slot -At $at -Label "預約$($p.Label)" }
-    "✅ $($p.Label)約好了：$(Format-PunchTime $at -Now $Now)$note"
+    "✅ $($p.Label)已預約：$(Format-PunchTime $at -Now $Now)$note"
 }
 
 function Register-PunchTask {
@@ -129,14 +129,9 @@ function Register-PunchTask {
         -Force -ErrorAction Stop | Out-Null
 }
 
-# 前面標「今天／明天」：值班隔天的下班卡會跨天，要一眼看出是哪天執行
+# 通知裡的時間格式 11/17（二）07:50，跟 shift-lib.ps1 的 Format-Stamp 一致（這支不一定有載入 shift-lib）。
+# 帶星期：值班隔天的下班卡會跨天，要一眼看出是哪天執行。$Now 留著給舊呼叫端，不再使用
 function Format-PunchTime {
     param([datetime]$At, [datetime]$Now = (Get-Date))
-    $stamp = "$($At.ToString('MM/dd')) ($('日一二三四五六'[[int]$At.DayOfWeek])) $($At.ToString('HH:mm'))"
-    switch (($At.Date - $Now.Date).Days) {
-        0       { "今天 $stamp" }
-        1       { "明天 $stamp" }
-        2       { "後天 $stamp" }
-        default { $stamp }
-    }
+    "$($At.ToString('MM/dd'))（$('日一二三四五六'[[int]$At.DayOfWeek])）$($At.ToString('HH:mm'))"
 }

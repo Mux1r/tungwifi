@@ -35,13 +35,13 @@ if ($DryRun) {
                   elseif ($out -match 'RESULT: FAIL no-wifi') { 'no-wifi' } else { 'fail' }
     $why = ($out | Select-String 'RESULT: FAIL (.+)$' | Select-Object -First 1).Matches.Groups[1].Value
     $text = if ($out -match 'RESULT: DRYRUN') {
-        "🧪 測試通過：連得上 guest_tung、打卡網頁登入有效，也找得到「立即打卡」按鈕。真的打卡應該沒問題（這次沒有按下去）。"
+        "✅ 打卡測試通過`n連線、登入、打卡按鈕均正常（未實際送出）"
     } elseif ($out -match 'RESULT: FAIL login-expired') {
-        "🧪 測試失敗：打卡網頁登入已過期。到控制面板按「打開打卡網頁（登入用）」重新掃 QR Code。"
+        "❌ 打卡測試失敗`n原因：打卡網頁登入逾期`n處理：請至控制面板重新掃描 QR Code 登入"
     } elseif ($out -match 'RESULT: FAIL no-wifi') {
-        "🧪 測試失敗：電腦連不上 guest_tung（不在醫院或訊號太弱），只有 guest_tung 能打卡。"
+        "❌ 打卡測試失敗`n原因：無法連線 guest_tung"
     } else {
-        "🧪 測試失敗$(if ($why) { "（$why）" })：沒走到「立即打卡」那一步，真的打卡可能也會失敗。$(if ($fresh) { '截圖附在下方。' })"
+        "❌ 打卡測試失敗`n原因：未到達打卡步驟$(if ($why) { "（$why）" })$(if ($fresh) { "`n處理：請檢視下方截圖" })"
     }
     try {
         $thread = Send-Telegram $text -Topic schedule -Event test -Data @{ Result = $testResult; Why = $why; HasShot = $fresh }
@@ -51,20 +51,22 @@ if ($DryRun) {
     exit
 }
 # 驗證過＝打卡網頁上真的出現「打卡成功」和剛剛的時間；按鈕都點了但沒看到這句，一樣當沒打成
-$twice = if ($retried) { '間隔 5 分鐘試了兩次，' } else { '' }
+$twice = if ($retried) { '共嘗試 2 次，均' } else { '' }
+$stamp = Format-Stamp (Get-Date)
+$sysStamp = try { Format-Stamp ([datetime]$sysTime) } catch { $sysTime }
 # Result 給 message-hook.ps1 分辨是哪一種結果（見 shift-lib.ps1 的 Use-MessageHook）
 $result = if ($verified) { 'ok' } elseif ($out -match 'RESULT: FAIL login-expired') { 'login-expired' }
           elseif ($out -match 'RESULT: FAIL no-wifi') { 'no-wifi' } elseif ($fresh) { 'unverified' } else { 'no-shot' }
 $text = if ($verified) {
-    "✅ ${card}打卡成功（系統記錄 $sysTime）$(if ($retried) { '，第一次失敗，5 分鐘後重試成功' })"
+    "✅ ${card}打卡成功`n系統時間：$sysStamp$(if ($retried) { "`n備註：首次失敗，5 分鐘後重試成功" })"
 } elseif ($out -match 'RESULT: FAIL login-expired') {   # 2026-10-19：網頁停在掃 QR Code 登入的頁面
-    "⚠️ ${card}打卡失敗（$(Get-Date -Format 'MM/dd HH:mm')）：打卡網頁登入已過期，需重新掃 QR Code 登入。請先手動補打。"
+    "❌ ${card}打卡失敗`n時間：$stamp`n原因：打卡網頁登入逾期`n處理：請重新掃描 QR Code 登入，並手動補打"
 } elseif ($out -match 'RESULT: FAIL no-wifi') {
-    "⚠️ ${card}打卡失敗（$(Get-Date -Format 'MM/dd HH:mm')）：電腦連不上 guest_tung（不在醫院或訊號太弱），只有 guest_tung 能打卡。請手動打卡。"
+    "❌ ${card}打卡失敗`n時間：$stamp`n原因：無法連線 guest_tung`n處理：請手動補打"
 } elseif ($fresh) {
-    "⚠️ ${card}可能未打成（$(Get-Date -Format 'MM/dd HH:mm')）：${twice}畫面上未出現「打卡成功」，截圖附於下方。請確認，未打到需手動補打。"
+    "⚠️ ${card}可能未完成`n時間：$stamp`n原因：${twice}未出現「打卡成功」`n處理：請檢視下方截圖，未完成請手動補打"
 } else {
-    "⚠️ ${card}可能未打成（$(Get-Date -Format 'MM/dd HH:mm')）：${twice}未產生新截圖。請確認，未打到需手動補打。"
+    "⚠️ ${card}可能未完成`n時間：$stamp`n原因：${twice}未產生截圖`n處理：請確認，未完成請手動補打"
 }
 # 上班卡打完附上下班卡的預約時間，沒有預約就提醒。
 # 刻意不用 punch-lib 的 Get-PunchBooking：那支會順手 Unregister 過期的預約，而 punch-guard.ps1
@@ -76,9 +78,9 @@ if ($Label -like "*上班*") {
     $bookedAt = if ($outTask) { [datetime]$outTask.Triggers[0].StartBoundary } else { $null }
     if ($bookedAt -and $bookedAt -gt (Get-Date)) {
         $offAt = Format-PunchTime $bookedAt
-        $text += "`n🕔 下班卡已預約：$offAt"
+        $text += "`n下班卡：$offAt"
     } else {
-        $text += "`n🕔 下班卡還沒預約，點一下就能約：`n/off（17:35 左右）`n/am_off（值班隔天 08:05 左右）`n/pm_off（值班隔天 11:35 左右）"
+        $text += "`n下班卡：尚未預約，請傳送 /off、/am_off 或 /pm_off"
     }
 }
 $data = @{ Result = $result; Card = $card; Label = $Label; SysTime = $sysTime; Retried = $retried

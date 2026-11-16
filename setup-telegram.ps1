@@ -62,7 +62,7 @@ $content = "# Telegram 通知設定，由 setup-telegram.ps1 填寫。留空就�
 
 try {
     Invoke-RestMethod "https://api.telegram.org/bot$token/sendMessage" -Method POST -TimeoutSec 15 `
-        -Body @{ chat_id = $chatId; text = "✅ 打卡通知設定完成，之後的預約和打卡結果會傳到這裡。`n可用指令：/punch 立即打卡、/status 查看預約、/cancel 取消預約" } | Out-Null
+        -Body @{ chat_id = $chatId; text = "✅ Telegram 通知設定完成`n預約及打卡結果將傳送至此`n`n/punch 立即打卡`n/status 查詢系統狀態`n/cancel 取消預約" } | Out-Null
     Write-Host "`n設定完成（$who），Telegram 應該已收到一則測試訊息。" -ForegroundColor Green
 } catch {
     Write-Host "`n設定已儲存，但測試訊息發送失敗：$($_.Exception.Message)" -ForegroundColor Yellow

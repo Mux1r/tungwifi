@@ -42,7 +42,7 @@ function Send-Note {
 # ── 讀班表 ──────────────────────────────────────────────
 $codes = Read-ShiftTable
 if ($codes.Count -eq 0) {
-    Send-Note "⚠️ 班表是空的或找不到（data\shifts.csv），卡未預約。請更新班表。" @{ Result = 'no-table' }
+    Send-Note "⚠️ 未預約打卡`n原因：班表不存在或為空`n處理：請更新 data\shifts.csv" @{ Result = 'no-table' }
     return
 }
 
@@ -54,7 +54,7 @@ $wk   = '日一二三四五六'[[int]$day.DayOfWeek]
 $when = "$($day.ToString('MM/dd'))（$wk）"
 
 if (-not $codes.ContainsKey($key)) {
-    Send-Note "📅 班表上沒有${dayWord} ${when}的資料，${dayWord}的卡未預約。請更新班表。" @{ Result = 'no-day'; DayWord = $dayWord; When = $when }
+    Send-Note "⚠️ ${dayWord} ${when}未預約打卡`n原因：班表無此日資料`n處理：請更新 data\shifts.csv" @{ Result = 'no-day'; DayWord = $dayWord; When = $when }
     return
 }
 
@@ -64,22 +64,22 @@ $next = $codes[$day.AddDays(1).ToString('yyyy-MM-dd')]
 try {
     $punches = @(Get-ShiftPunches -Date $day -Code $code -NextCode $next)
 } catch {
-    Send-Note "⚠️ ${dayWord} ${when}的班別代碼「$code」無法辨識，未預約。請自行打卡。" @{ Result = 'unknown-code'; DayWord = $dayWord; When = $when; Code = $code }
+    Send-Note "⚠️ ${dayWord} ${when}未預約打卡`n原因：無法辨識班別代碼「$code」`n處理：請手動打卡" @{ Result = 'unknown-code'; DayWord = $dayWord; When = $when; Code = $code }
     return
 }
 
 # 這天是不是值班（只打上班卡、下班卡落在隔天）
 $isOncall = ($code -eq '9076') -and ($punches.Count -eq 2) -and ($punches[1].Date -ne $day)
 $intro = switch ($code) {
-    '906'  { "${dayWord} ${when}：值班隔天早上，只打下班卡" }
-    '908'  { "${dayWord} ${when}：值班隔天中午，只打下班卡" }
-    '9076' { if ($isOncall) { "${dayWord} ${when}：值班，只打上班卡，下班卡排在隔天" }
-             else { "${dayWord} ${when}：全天班，上下班都打" } }
+    '906'  { "${dayWord} ${when}：值班隔日（早上下班）" }
+    '908'  { "${dayWord} ${when}：值班隔日（中午下班）" }
+    '9076' { if ($isOncall) { "${dayWord} ${when}：值班（下班卡排於隔日）" }
+             else { "${dayWord} ${when}：全天班" } }
     default { "${dayWord} ${when}：休假" }
 }
 
 if ($punches.Count -eq 0) {
-    Send-Note "📅 ${intro}，不需打卡。" @{ Result = 'rest'; DayWord = $dayWord; When = $when; Code = $code; Intro = $intro }
+    Send-Note "📅 ${intro}`n無需打卡" @{ Result = 'rest'; DayWord = $dayWord; When = $when; Code = $code; Intro = $intro }
     return
 }
 
@@ -89,20 +89,19 @@ foreach ($p in $punches) {
     $plan = $Plans[$p.Kind]
     $at   = Get-PunchMoment -Punch $p
     if ($at -le $Now) {
-        $lines += "⚠️ $($plan.Label)　$(Format-PunchTime $at -Now $Now) 已經過了，沒排"
+        $lines += "$($plan.Label)：$(Format-PunchTime $at -Now $Now)（已過時間，未預約）"
         continue
     }
     if (-not $DryRun) { Register-PunchTask -Name $plan.Slot -At $at -Label "預約$($plan.Label)" }
-    $icon = if ($p.Kind -eq 'in') { '🌅' } else { '🌆' }
-    $lines += "$icon $($plan.Label)　$(Format-PunchTime $at -Now $Now)"
+    $lines += "$($plan.Label)：$(Format-PunchTime $at -Now $Now)"
 }
 
-$text = "📅 ${intro}`n`n已預約：`n$($lines -join "`n")`n不對的話傳 /cancel 取消。"
+$text = "📅 ${intro}`n$($lines -join "`n")`n如需取消，請傳送 /cancel"
 
 # 班表快用完就提前提醒，免得月底那幾天沒排到
 $left = @($codes.Keys | Where-Object { $_ -ge $key }).Count
 if ($left -le 5) {
-    $text += "`n`n📖 班表剩 $left 天，請更新 data\shifts.csv。"
+    $text += "`n`n⚠️ 班表剩餘 $left 天，請更新 data\shifts.csv"
 }
 
 Send-Note $text @{ Result = 'booked'; DayWord = $dayWord; When = $when; Code = $code; Intro = $intro

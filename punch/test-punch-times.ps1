@@ -17,13 +17,8 @@ Assert ($t.Date -eq [datetime]'2026-07-28') "07:52 下指令 → 排到明天"
 $t = Get-NextPunchTime -Hour 8 -Minute 0 -Offset $InOff -Now ([datetime]'2026-07-31 23:30')
 Assert ($t.Date -eq [datetime]'2026-08-01') "月底 23:30 → 隔月 1 號"
 
-# 標示今天/明天，跨天才不會看錯
-$today = (Get-Date).Date.AddHours(8).AddMinutes(8)
-Assert ((Format-PunchTime $today) -like "今天 * (*) 08:08") "今天標示"
-Assert ((Format-PunchTime $today.AddDays(1)) -like "明天 * (*) 08:08") "明天標示"
-Assert ((Format-PunchTime $today.AddDays(3)) -notlike "*今天*") "3 天後不標今天/明天"
-Assert ((Format-PunchTime $today.AddDays(2)) -like "後天 *") "後天標示"
-Assert ((Format-PunchTime ([datetime]'2026-07-27 07:48')) -like "*07/27 (一) 07:48") "格式化含星期"
+# 時間格式含星期，跨天才不會看錯
+Assert ((Format-PunchTime ([datetime]'2026-07-27 07:48')) -eq "07/27（一）07:48") "格式化含星期"
 
 # 下班卡跟著上班卡的日期算：/in 明天 → /pm_off（官方 11:30）要排到後天
 $inAt = (Get-Date).Date.AddDays(1).AddHours(7).AddMinutes(48)
@@ -130,9 +125,9 @@ Assert ($null -eq (Find-ShiftPunchTime -Kind 'pm_off' -Codes @{ '2026-09-17' = '
 
 # 預約回覆（DryRun 不動排程）：照班表的不加註，沒班表的要講明是照時間排
 $r = Add-PunchBooking -Kind 'pm_off' -Codes $codes -Now $now -DryRun
-Assert ($r -like '*下班卡約好了*' -and $r -notlike '*找不到*') "有班表 → 照班表約"
+Assert ($r -like '*下班卡已預約*' -and $r -notlike '*備註*') "有班表 → 照班表約"
 $r = Add-PunchBooking -Kind 'off' -Codes @{} -Now ([datetime]'2026-09-17 09:00') -DryRun
-Assert ($r -like '*找不到這張卡*' -and $r -match '17:(3[5-9]|40)') "沒班表 → 照時間排 17:35–17:40 並註明"
+Assert ($r -like '*無此班別*' -and $r -match '17:(3[5-9]|40)') "沒班表 → 照時間排 17:35–17:40 並註明"
 
 # 夜間睡眠的安全時段（sleep.ps1 的 Test-SleepWindow）：睡覺前 15 分鐘到起床前 2 小時，可以跨午夜
 $sleepAst = [Management.Automation.Language.Parser]::ParseFile("$PSScriptRoot\..\sleep.ps1", [ref]$null, [ref]$null)

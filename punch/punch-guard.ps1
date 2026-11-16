@@ -51,17 +51,18 @@ foreach ($name in 'PunchIn-Booked', 'PunchOut-Booked') {
     $ok   = [bool](Test-Path $log) -and [bool](Get-Content $log -Encoding UTF8 | Where-Object {
                 $_ -match 'RESULT: OK (\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})' -and [datetime]$matches[1] -ge $at.AddMinutes(-1) })
     $shot = (Test-Path $Png) -and ((Get-Item $Png).LastWriteTime -gt $at)
-    $when = $at.ToString('MM/dd HH:mm')
+    $when = $at.ToString('MM/dd HH:mm')   # 給 message-hook 的原始資料，格式不變
+    $stamp = Format-Stamp $at
 
     # $result 給 message-hook.ps1 分辨是哪一種情況
     if ($ran -and $ok) {
         $warn = $null; $result = 'ok'                    # 打成了，安靜收工
     } elseif ($ran -and $shot) {
-        $warn = "⚠️ ${label}（$when）紀錄中未出現「打卡成功」，可能未打成。請確認並手動補打。"; $result = 'unverified'
+        $warn = "⚠️ ${label}可能未完成`n預約時間：$stamp`n原因：紀錄未出現「打卡成功」`n處理：請確認，未完成請手動補打"; $result = 'unverified'
     } elseif ($ran) {
-        $warn = "⚠️ ${label}（$when）已到時間但未產生新截圖，可能未打成。請確認並手動補打。"; $result = 'no-shot'
+        $warn = "⚠️ ${label}可能未完成`n預約時間：$stamp`n原因：未產生截圖`n處理：請確認，未完成請手動補打"; $result = 'no-shot'
     } elseif ($now -gt $at.AddMinutes(60)) {
-        $warn = "⚠️ ${label}（$when）已到時間但排程未執行，請手動打卡並檢查排程。"; $result = 'not-run'
+        $warn = "❌ ${label}未執行`n預約時間：$stamp`n原因：排程未執行`n處理：請手動補打，並檢查排程"; $result = 'not-run'
     } else {
         continue    # 還沒跑，但還在等 StartWhenAvailable 補跑（例如電腦剛開機），先別動它
     }

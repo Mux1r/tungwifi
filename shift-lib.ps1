@@ -68,6 +68,11 @@ function Use-MessageHook {
     $Text
 }
 
+# 通知裡的時間一律寫成 11/17（二）07:50
+function Format-Stamp([datetime]$At) {
+    "$($At.ToString('MM/dd'))（$('日一二三四五六'[[int]$At.DayOfWeek])）$($At.ToString('HH:mm'))"
+}
+
 # 送一則 Telegram。有話題設定（data/tg-topics.json）就送進指定話題，沒有就直接送聊天室。
 # 話題讀不到或被刪了就改送沒分區的地方，訊息不能因此不見；整個送不出去也不丟錯，通知失敗不能害正事跟著失敗。
 # 回傳實際送進的話題 id（scheduled-punch.ps1 的截圖要跟著送同一個話題）。
