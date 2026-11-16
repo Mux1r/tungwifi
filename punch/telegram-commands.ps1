@@ -1,10 +1,10 @@
 ﻿#Requires -Version 5.1
 # 在背景接收 Telegram 指令：
-#   打卡：/punch 立即打卡      /test 測試打卡（停在按下去前一步）
+#   打卡：/punch 立即打卡      /test 測試打卡流程（不實際送出）
 #   預約：/in /off /am_off /pm_off 預約上班卡／下班卡   /cancel 取消預約
-#   查詢：/status 查預約和連線狀態
-#   睡眠：/sleepoff 今晚不睡   /sleepon 今晚照常睡（有開夜間睡眠才出現在選單）
-#   更新：/update 更新到最新版 /rollback 退回上一版（有上一版可退才出現在選單）
+#   查詢：/status 系統狀態（網路、預約、睡眠）
+#   睡眠：/sleepoff 今晚停用睡眠 /sleepon 今晚恢復睡眠（有開夜間睡眠才出現在選單）
+#   更新：/update 更新至最新版本 /rollback 還原上一版本（有上一版本才出現在選單）
 # 只聽 bot-config.ps1 裡 $AuthChatId 那個人的話，其他人傳來的一律不理。
 #
 # 用法：
@@ -90,7 +90,7 @@ $Aliases = @{
     '/sleepoff' = 'sleepoff'; '/nosleep' = 'sleepoff'; '/不睡' = 'sleepoff'
     '/sleepon' = 'sleepon'; '/恢復睡眠' = 'sleepon'
     '/update' = 'update'; '/更新' = 'update'
-    '/rollback' = 'rollback'; '/退版' = 'rollback'
+    '/rollback' = 'rollback'; '/還原' = 'rollback'; '/退版' = 'rollback'
 }
 # 選單和說明依狀態變：沒開夜間睡眠就不列睡眠指令，沒有上一版就不列 /rollback。
 # 藏起來的指令照樣能打，只是不佔選單。Telegram 選單不能分組，用排序＋每組的開頭符號區分

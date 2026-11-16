@@ -1047,7 +1047,7 @@ $lblCurVer.AutoEllipsis = $true
 $tipVer = New-Object System.Windows.Forms.ToolTip   # 被「…」截掉時，滑鼠停上去看完整內容
 $btnChkUpd = New-Btn $cardVer "檢查更新"   52  106 124 32 $Icon.Search
 $btnApply  = New-Btn $cardVer "立即更新"   184 106 124 32 $Icon.Download -Accent
-$btnRollbk = New-Btn $cardVer "退回上一版" 316 106 132 32 $Icon.Undo
+$btnRollbk = New-Btn $cardVer "還原上一版" 316 106 132 32 $Icon.Undo
 $lblUpdMsg = New-Lbl $cardVer "" 460 114 214 20 $F_Cap $C_MUTE
 $btnApply.Enabled = $false
 
@@ -1442,11 +1442,11 @@ $btnApply.Add_Click({
 
 $btnRollbk.Add_Click({
     $r = [System.Windows.Forms.MessageBox]::Show(
-        "確定要退回上一版？退掉的這版之後不會再自動裝回來。", "退回上一版",
+        "確定要還原至上一版本？已還原的版本不會再自動安裝。", "還原上一版",
         [System.Windows.Forms.MessageBoxButtons]::YesNo, [System.Windows.Forms.MessageBoxIcon]::Question)
     if ($r -ne [System.Windows.Forms.DialogResult]::Yes) { return }
     $btnRollbk.Enabled = $false; $btnApply.Enabled = $false
-    $lblUpdMsg.Text = "退版中..."; $lblUpdMsg.ForeColor = $C_MUTE
+    $lblUpdMsg.Text = "還原中..."; $lblUpdMsg.ForeColor = $C_MUTE
     $old = (Get-VersionLine).Sha
     $done = Invoke-ScriptUI $script:UpdateScript @('-Rollback', '-Quiet') 900
     if (Restart-IfChanged $old) { return }   # 關掉之後不要再動已經關掉的畫面
