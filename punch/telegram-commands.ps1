@@ -44,6 +44,15 @@ $LogFile = "$PSScriptRoot\..\data\telegram-commands.log"
 function Reply([string]$Text) {
     try { Invoke-RestMethod "$Api/sendMessage" -Method POST -TimeoutSec 15 -Body @{ chat_id = $AuthChatId; text = $Text } | Out-Null } catch {}
 }
+# 要查幾秒的指令：先回一句「查詢中」讓本人知道收到了，查完把同一則改成結果；改不了（訊息太舊、網路斷）就另傳一則
+function Reply-After([string]$Wait, [scriptblock]$Get) {
+    $id = try { (Invoke-RestMethod "$Api/sendMessage" -Method POST -TimeoutSec 15 -Body @{ chat_id = $AuthChatId; text = $Wait }).result.message_id } catch { $null }
+    $text = & $Get
+    if ($id) {
+        try { Invoke-RestMethod "$Api/editMessageText" -Method POST -TimeoutSec 15 -Body @{ chat_id = $AuthChatId; message_id = $id; text = $text } | Out-Null; return } catch {}
+    }
+    Reply $text
+}
 function Log([string]$Msg) { try { Add-Content $LogFile "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Msg" } catch {} }
 
 # 刻意不用「順手清掉過期預約」的寫法：過期的那張 punch-guard.ps1 還要拿來判斷卡有沒有打成
@@ -185,7 +194,7 @@ while ($true) {
                     try { Reply (Add-PunchBooking -Kind $action -Codes (Read-ShiftTable)) }
                     catch { Reply "❌ 預約失敗`n原因：$($_.Exception.Message)" }
                 }
-                'status' { Reply "🔍 系統狀態`n$(Get-NetLine)`n$(Get-BookingLines)$(Get-SleepLine)" }
+                'status' { Reply-After "🔍 查詢中…" { "🔍 系統狀態`n$(Get-NetLine)`n$(Get-BookingLines)$(Get-SleepLine)" } }
                 'cancel' {
                     $had = @((Get-Bookings).Values | Where-Object { $_ }).Count -gt 0
                     $TaskIn, $TaskOut | ForEach-Object {
