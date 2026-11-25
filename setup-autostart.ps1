@@ -17,6 +17,8 @@ Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Silent
 
 # ExecutionTimeLimit 用 0 = 不限時；原本設 365 天，2026-10-21 跑 19 天就被判超時砍掉
 try {
+    # conhost --headless：完全不建視窗。原本 powershell.exe -WindowStyle Hidden 是先開視窗再藏，
+    # 每小時補開那份一啟動就因為已有一份在跑而結束，整點都會閃一下藍色視窗
     Register-ScheduledTask -TaskName $TaskName -Force -ErrorAction Stop `
         -Trigger   @(
                         (New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME),
@@ -28,8 +30,6 @@ try {
                         -ExecutionTimeLimit ([TimeSpan]::Zero) `
                         -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 2) `
                         -MultipleInstances IgnoreNew) `
-        # conhost --headless：完全不建視窗。原本 powershell.exe -WindowStyle Hidden 是先開視窗再藏，
-        # 每小時補開那份一啟動就因為已有一份在跑而結束，整點都會閃一下藍色視窗
         -Action    (New-ScheduledTaskAction -Execute "conhost.exe" `
                         -Argument "--headless powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -NonInteractive -File `"$MonitorScript`"") | Out-Null
     Write-Host "  完成，每次登入會自動在背景啟動。" -ForegroundColor Green
