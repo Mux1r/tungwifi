@@ -12,7 +12,8 @@ param(
     [switch]$Silent,
     [switch]$DryRun,
     [switch]$Open,
-    [string]$ProfileDir
+    [string]$ProfileDir,
+    [int]$DebugPort   # 好幾個人同時打卡時各用各的埠，不會互相關掉對方的 Chrome；不給照舊 9222／9223
 )
 
 $SSID      = "guest_tung"
@@ -28,7 +29,7 @@ $ChromeExe      = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
                     "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
                     "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe") |
                   Where-Object { Test-Path $_ } | Select-Object -First 1
-$DebugPort      = if ($ProfileDir) { 9223 } else { 9222 }   # 別人的卡用另一個埠：跟主人的預約卡同時跑也不會互相關掉對方的 Chrome
+if (-not $DebugPort) { $DebugPort = if ($ProfileDir) { 9223 } else { 9222 } }   # 別人的卡用另一個埠：跟主人的預約卡同時跑也不會互相關掉對方的 Chrome
 # 登入狀態存在這個 Chrome 設定檔裡，不能放 %TEMP%：Windows 的「儲存空間感知」會清暫存，
 # 2026-10-18 下午被清掉一次，隔天下班卡就停在「行動登入」掃 QR Code 的頁面打不成
 $TempDir        = "$env:LOCALAPPDATA\tungwifi-punch\chrome"
