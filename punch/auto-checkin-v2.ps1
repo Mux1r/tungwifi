@@ -4,12 +4,15 @@
 #  用法: auto-checkin-v2.ps1 [-Silent] [-DryRun] [-Open]
 #        平常由 scheduled-punch.ps1 呼叫；-DryRun 只走到「立即打卡」前一步
 #        -Open 只用打卡的 Chrome 設定檔打開打卡網頁讓人登入（控制面板「打開打卡網頁」），不打卡
+#        -ProfileDir 改用別人的 Chrome 設定檔（替別的帳號打卡，例如 aemeath-bot 的 Discord /punch）；
+#                    紀錄和截圖改寫到 <設定檔>-logs，不混進這台主人的打卡紀錄（守門員和儀表板認 RESULT: OK）
 # ============================================================
 
 param(
     [switch]$Silent,
     [switch]$DryRun,
-    [switch]$Open
+    [switch]$Open,
+    [string]$ProfileDir
 )
 
 $SSID      = "guest_tung"
@@ -25,11 +28,12 @@ $ChromeExe      = @("$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
                     "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
                     "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe") |
                   Where-Object { Test-Path $_ } | Select-Object -First 1
-$DebugPort      = 9222
+$DebugPort      = if ($ProfileDir) { 9223 } else { 9222 }   # 別人的卡用另一個埠：跟主人的預約卡同時跑也不會互相關掉對方的 Chrome
 # 登入狀態存在這個 Chrome 設定檔裡，不能放 %TEMP%：Windows 的「儲存空間感知」會清暫存，
 # 2026-10-18 下午被清掉一次，隔天下班卡就停在「行動登入」掃 QR Code 的頁面打不成
 $TempDir        = "$env:LOCALAPPDATA\tungwifi-punch\chrome"
 $ScreenshotPath = "$PSScriptRoot\checkin-screenshot.png"
+if ($ProfileDir) { $TempDir = $ProfileDir; $ScreenshotPath = "$ProfileDir-logs\checkin-screenshot.png" }
 
 if ($Open) {
     if (-not $ChromeExe) { Write-Host "找不到 Chrome，請先安裝 Google Chrome。" -ForegroundColor Red; exit 1 }
@@ -40,7 +44,7 @@ if ($Open) {
 
 # 整段過程錄進 data/punch-logs/<年月>.log，截圖也留一份；不然事後只剩一張會被蓋掉的截圖可查
 # （2026-10-07 那張沒打成的卡，六天後回頭查已經什麼都沒有了）
-$LogDir = "$PSScriptRoot\..\data\punch-logs"
+$LogDir = if ($ProfileDir) { "$ProfileDir-logs" } else { "$PSScriptRoot\..\data\punch-logs" }
 New-Item -ItemType Directory -Force $LogDir | Out-Null
 try { Start-Transcript -Path "$LogDir\$(Get-Date -Format 'yyyy-MM').log" -Append | Out-Null } catch {}
 # 截圖一張約 60KB，留 60 天就好
