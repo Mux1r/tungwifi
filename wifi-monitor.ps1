@@ -128,21 +128,34 @@ function Invoke-ReconnectFlow {
         Start-Sleep -Seconds 5
     }
 
-    # 剛換 IP 時 Portal 常瞬間拒連，失敗後隔 10s 再試一次（手動晚點按就成功 = 純時機問題）
-    # 兩次都失敗就把 WiFi 斷開重連再試：Portal 有時卡在「Wi-Fi 連著、但登入頁不出來」，
-    # 只有重新關聯才會放出登入頁（2026-10-23 手動開關 WiFi 才救回來）
+    # Portal 有時卡在「Wi-Fi 連著、但登入不放行」，只有重新關聯（斷開 WiFi 重連）才會放行
+    # （2026-10-23 手動開關 WiFi 才救回來）。
+    # 定時保底（登入逾時）：第 1 次直接登入就會成功，失敗才隔 10s 再試，兩次都失敗第 3 次才重新關聯。
+    # IP 位址變更：log 顯示 2026-11 共 14 次幾乎都是前兩次登入失敗、重新關聯後才成功，
+    #             所以第 1 次失敗就直接重新關聯，不浪費 20～40 秒。
+    $reassocAt = if ($Reason -eq "IP 位址變更事件") { 2 } else { 3 }
     foreach ($try in 1..3) {
-        if ($try -eq 3) {
+        if ($try -eq $reassocAt) {
             if ((Get-WifiState) -ne "on") { Write-Log "WiFi 已不在 '$SSID'，不重連" "Cyan"; break }
-            Write-Log "登入兩次無效，斷開 WiFi 重新連接..." "Yellow"
+            Write-Log "登入無效，斷開 WiFi 重新連接..." "Yellow"
             netsh wlan disconnect | Out-Null
             Start-Sleep -Seconds 3
-            if (-not (Connect-WiFiSSID)) { Write-Log "重新連接 WiFi 失敗" "Red"; break }
+            if (-not (Connect-WiFiSSID)) {
+                # 30s 有時不夠（11-18、11-25 各一次：放棄後幾秒 Windows 就自己連上了），再給一次機會
+                Write-Log "30s 內未連上，再等一次..." "Yellow"
+                if (-not (Connect-WiFiSSID)) { Write-Log "重新連接 WiFi 失敗" "Red"; break }
+            }
             Start-Sleep -Seconds 5
         }
         Write-Log "送出 Captive Portal 登入 (wifi-login.ps1) 第 $try/3 次..." "Yellow"
-        & powershell.exe -ExecutionPolicy Bypass -NonInteractive `
-            -File $LoginScript -Silent 2>&1 | Out-Null
+        $out = & powershell.exe -ExecutionPolicy Bypass -NonInteractive `
+            -File $LoginScript -Silent 2>&1
+        $code = $LASTEXITCODE
+        # 只記關鍵結果（HTTP 回應、驗證結果），不記 URL；之後才查得到 Portal 實際回了什麼
+        $out | ForEach-Object { "$_".Trim() } |
+            Where-Object { $_ -match "HTTP 回應|POST 失敗|generate_204|connecttest|仍無法上網|\[FAIL\]" } |
+            ForEach-Object { Write-Log "  login: $_" "DarkGray" }
+        Write-Log "  login: exit $code" "DarkGray"
         Start-Sleep -Seconds 5
 
         if (Test-Online) {
@@ -150,7 +163,7 @@ function Invoke-ReconnectFlow {
             $script:FailStreak = 0
             return
         }
-        if ($try -eq 1) { Start-Sleep -Seconds 10 }
+        if ($try + 1 -ne $reassocAt -and $try -lt 3) { Start-Sleep -Seconds 10 }
     }
     Write-Log "登入後仍無法上網，等待下次觸發" "Red"
     Add-FailStreak
