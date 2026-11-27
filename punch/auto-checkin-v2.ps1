@@ -445,8 +445,9 @@ if ($attempt -gt 1 -and (Get-Date) -gt $hardStop) {
     break
 }
 if ($attempt -gt 1) {
-    Write-Host "  第 $attempt 次重打：重新載入頁面..." -ForegroundColor Yellow
-    Invoke-CDP -WsUrl $wsUrl -Method "Page.reload" -Params @{ ignoreCache = $true } | Out-Null
+    Write-Host "  第 $attempt 次重打：回到首頁重來..." -ForegroundColor Yellow
+    # 回首頁，不是重新載入：上一輪點過「出勤打卡」已經在打卡頁，重新載入還是打卡頁，等不到首頁的 .punch-text（2026-11-27 07:45 三輪全白打）
+    Invoke-CDP -WsUrl $wsUrl -Method "Page.navigate" -Params @{ url = $PwaUrl } | Out-Null
     Start-Sleep -Seconds 8
 }
 
@@ -465,8 +466,8 @@ for ($try = 1; $try -le 2; $try++) {
         Write-Host "  已超過總期限，不再重新載入，直接試打。" -ForegroundColor Yellow
         break
     } elseif ($try -eq 1) {
-        Write-Host "  等不到打卡按鈕，強制重新載入頁面..." -ForegroundColor Yellow
-        Invoke-CDP -WsUrl $wsUrl -Method "Page.reload" -Params @{ ignoreCache = $true } | Out-Null
+        Write-Host "  等不到打卡按鈕，回首頁重新載入..." -ForegroundColor Yellow
+        Invoke-CDP -WsUrl $wsUrl -Method "Page.navigate" -Params @{ url = $PwaUrl } | Out-Null
         Start-Sleep -Seconds 8
     } else {
         Write-Host "  重載後仍找不到打卡按鈕，接下來的步驟可能失敗。" -ForegroundColor Yellow
@@ -500,13 +501,19 @@ $js = @"
     punchCard.click();
 
     // ── 步驟 2：等 modal → 點「關閉」───────────────────
-    await wait(1800);
-    var closeBtn = document.querySelector('button[data-bs-dismiss="modal"]');
-    if (!closeBtn) {
-        closeBtn = Array.from(document.querySelectorAll('button')).find(function(b){
-            return b.textContent.trim() === '關閉';
-        });
+    // 點完會換到打卡頁再跳提示，網路慢時要好幾秒（2026-11-27 07:45 固定等 1.8 秒，頁面還沒換好就往下走）。
+    // 輪詢最多 15 秒，只認看得到的關閉鈕（藏著的 modal 裡也有一顆）；找到後再等 0.5 秒，提示的淡入動畫沒跑完按關閉會被忽略
+    function findClose() {
+        var all = Array.from(document.querySelectorAll('button')).filter(function(b){ return b.getClientRects().length > 0; });
+        return all.find(function(b){ return b.matches('[data-bs-dismiss="modal"]'); }) ||
+               all.find(function(b){ return b.textContent.trim() === '關閉'; });
     }
+    var closeBtn = null;
+    for (var c = 0; !closeBtn && c < 30; c++) {
+        await wait(500);
+        closeBtn = findClose();
+    }
+    if (closeBtn) { await wait(500); }
     if (!closeBtn) {
         return { ok: false, step: 2, msg: '找不到「關閉」按鈕（modal 可能未出現）', clicked: clicked };
     }
