@@ -523,7 +523,9 @@ $js = @"
     // ── 步驟 3：點「立即打卡」（DryRun 時跳過）──────────
     await wait(1500);
     if (dryRun) {
-        return { ok: true, step: 3, msg: '測試模式：步驟 1-2 成功，跳過立即打卡', dryRun: true, clicked: clicked };
+        // 畫面文字一起記下來（有姓名），幫別人設定登入時可以核對登入的是不是本人的帳號
+        return { ok: true, step: 3, dryRun: true, clicked: clicked,
+                 msg: '測試模式：步驟 1-2 成功，跳過立即打卡｜畫面文字：' + (document.body.innerText || '').replace(/\s+/g, ' ').slice(0, 200) };
     }
     // 網路慢時按鈕可能 3 秒後才出現（別台電腦 2026-10-21），輪詢最多約 10 秒
     function findNowBtn() {
